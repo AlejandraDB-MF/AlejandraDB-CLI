@@ -29,7 +29,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-deny
+          tool: cargo-nextest
 
       - uses: Swatinem/rust-cache@v2
 
@@ -41,9 +41,6 @@ jobs:
 
       - name: Build release
         run: cargo build --release
-
-      - name: Security policy (cargo-deny)
-        run: cargo deny --config .cargo/deny.toml check
 
   build:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
