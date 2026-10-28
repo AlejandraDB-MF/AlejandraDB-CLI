@@ -8,7 +8,17 @@ Terminal tool for managing Android devices through ADB. Lists devices, manages a
 - `adb` binary on PATH, or set `ADB_PATH`
 - On Fedora: `sudo dnf install android-tools`
 
-## Install
+## Install (prebuilt)
+
+Linux (x86_64/aarch64, static musl):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main/install.sh | sh
+```
+
+Windows: download `alejandradb.exe` from the [latest release](https://github.com/AlejandraDB-MF/AlejandraDB-CLI/releases/latest) and place it in your PATH.
+
+## Install (from source)
 
 ```bash
 cargo build --release
