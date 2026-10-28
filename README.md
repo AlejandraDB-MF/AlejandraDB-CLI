@@ -18,6 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main
 
 Windows: download `alejandradb.exe` from the [latest release](https://github.com/AlejandraDB-MF/AlejandraDB-CLI/releases/latest) and place it in your PATH.
 
+Nightly/dev builds (from `develop`) are published as prereleases tagged `nightly-<sha>`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main/install.sh | sh -s -- nightly-<sha>
+```
+
 ## Install (from source)
 
 ```bash

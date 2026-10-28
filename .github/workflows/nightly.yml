@@ -1,0 +1,112 @@
+name: Nightly
+
+on:
+  push:
+    branches: [develop]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set dev version
+        shell: bash
+        env:
+          SHA: ${{ steps.sha.outputs.short }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          sha = os.environ["SHA"]
+          p = "Cargo.toml"
+          s = open(p).read()
+          s = re.sub(r'^version\s*=\s*"[^"]*"', 'version = "0.0.0-dev.' + sha + '"', s, count=1, flags=re.M)
+          open(p, "w").write(s)
+          print("dev version set:", "0.0.0-dev." + sha)
+          PY
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive
+        shell: bash
+        run: |
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            *windows*)
+              tar czf "dist/alejandradb-${{ matrix.target }}-nightly.tar.gz" -C "target/${{ matrix.target }}/release" alejandradb.exe
+              ;;
+            *)
+              tar czf "dist/alejandradb-${{ matrix.target }}-nightly.tar.gz" -C "target/${{ matrix.target }}/release" alejandradb
+              ;;
+          esac
+          ( cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alejandradb-${{ matrix.target }}-nightly-${{ steps.sha.outputs.short }}
+          path: dist/
+          if-no-files-found: error
+
+  publish-nightly:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: alejandradb-*-nightly-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        with:
+          tag_name: nightly-${{ github.sha }}
+          name: "Nightly (${{ github.sha }})"
+          prerelease: true
+          files: dist/*
