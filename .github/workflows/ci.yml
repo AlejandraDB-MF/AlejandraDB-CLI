@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Quick gate (fmt + clippy + tests)
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
+          cargo nextest run
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Security policy (cargo-deny)
+        run: cargo deny --config .cargo/deny.toml check
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    needs: ci
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - name: Install musl cross toolchain (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          cd /tmp
+          curl -fsSL --retry 3 -o tc.tar.xz \
+            https://github.com/cross-tools/musl-cross/releases/download/20260823/aarch64-unknown-linux-musl.tar.xz
+          tar xJf tc.tar.xz
+          echo "/tmp/aarch64-unknown-linux-musl/bin" >> "$GITHUB_PATH"
+      - name: Install cross toolchains (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)  export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc ;;
+            aarch64-unknown-linux-musl) export CC_aarch64_unknown_linux_musl=aarch64-unknown-linux-musl-gcc
+                                        export AR_aarch64_unknown_linux_musl=aarch64-unknown-linux-musl-ar
+                                        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-unknown-linux-musl-gcc ;;
+          esac
+          cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Create archive
+        shell: bash
+        run: |
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            *windows*)
+              cp "target/${{ matrix.target }}/release/alejandradb.exe" dist/alejandradb.exe
+              powershell -NoProfile -Command \
+                "Compress-Archive -Path dist/alejandradb.exe -DestinationPath dist/alejandradb-windows-x86_64.zip -Force"
+              tar czf dist/alejandradb-windows-x86_64.tar.gz -C "target/${{ matrix.target }}/release" alejandradb.exe
+              ;;
+            *)
+              tar czf "dist/alejandradb-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" alejandradb
+              ;;
+          esac
+          ( cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alejandradb-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: alejandradb-*
+          merge-multiple: true
+          path: dist
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            ## Installation
+
+            ### Linux (x86_64, static musl)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main/install.sh | sh
+            ```
+
+            ### Windows
+            Download `alejandradb.exe` and place it in your PATH.
+
+            ### Manual
+            Pick the `.tar.gz` matching your target from the assets below and verify it against the adjacent `.sha256`.

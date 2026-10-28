@@ -1,0 +1,52 @@
+name: release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-plz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Require RELEASE_PLZ_TOKEN
+        env:
+          RELEASE_PLZ_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_PLZ_TOKEN}" ]; then
+            echo "::error::RELEASE_PLZ_TOKEN is not set."
+            echo ""
+            echo "Create a fine-grained PAT and add it as a repository secret:"
+            echo "  1. GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token"
+            echo "  2. Resource owner: AlejandraDB-MF"
+            echo "     Repository access: select only AlejandraDB-CLI"
+            echo "  3. Repository permissions:"
+            echo "       Contents:     Read and write"
+            echo "       Pull requests: Read and write"
+            echo "  4. Repo → Settings → Secrets and variables → Actions → New repository secret"
+            echo "     Name: RELEASE_PLZ_TOKEN   Secret: <paste the token>"
+            echo ""
+            echo "Docs: https://release-plz.dev/docs/github/token"
+            exit 1
+          fi
+          echo "RELEASE_PLZ_TOKEN is present."
+
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}

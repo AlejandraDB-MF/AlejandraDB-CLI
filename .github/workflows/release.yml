@@ -1,0 +1,18 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - run: sha256sum target/release/alejandradb > alejandradb.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/alejandradb
+            alejandradb.sha256

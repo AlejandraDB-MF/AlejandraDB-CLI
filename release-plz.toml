@@ -1,0 +1,16 @@
+# release-plz — automated version bumps from Conventional Commits.
+#
+# Flow: push to main → release-plz opens a "chore(release): vX.Y.Z" PR
+# (Cargo.toml + Cargo.lock bump) → merging that PR makes release-plz push
+# the git tag → the existing ci.yml release job builds and publishes binaries.
+
+[workspace]
+changelog_update = false
+git_release_enable = false
+pr_branch_prefix = "release-plz-"
+
+[[package]]
+name = "alejandradb"
+publish = false
+git_only = true
+semver_check = false
