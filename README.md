@@ -11,10 +11,11 @@ Terminal tool for managing Android devices through ADB. Lists devices, manages a
 ## Install
 
 ```bash
-cd adbcli
 cargo build --release
 ./target/release/alejandradb
 ```
+
+> The Rust project lives in the `adbcli/` directory. The commands above assume you are inside that directory.
 
 ## Usage
 
@@ -73,16 +74,6 @@ wifi_subnet = "192.168.1"
 ```
 
 Leave `wifi_subnet` empty for auto-detection from the local network interface.
-
-## Development
-
-```bash
-cargo build                # debug build
-cargo build --release      # release build
-cargo test                 # run tests
-cargo fmt --check          # check formatting
-cargo clippy -- -D warnings  # lint
-```
 
 The project uses Conventional Commits. See [CONTRIBUTING.md](./llm_files/CONTRIBUTING.md) for commit and release conventions.
 
