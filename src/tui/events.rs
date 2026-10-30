@@ -794,11 +794,21 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
             }
             match crate::adb::wifi_connect(&app.adb, &endpoint) {
                 Ok(_) => {
+                    app.loading = true;
+                    app.status = i18n::tr("device.select.loading");
                     app.load_devices();
-                    if app.serial.is_none() {
+                    if app.devices.iter().any(|d| d.serial == endpoint) {
+                        app.select_device(endpoint);
+                    } else if app.serial.is_none() {
                         app.open_device_select();
+                        app.status = format!(
+                            "{} (refresh if not listed)",
+                            i18n::tr("wifi.status.connected")
+                        );
+                    } else {
+                        app.status = i18n::tr("wifi.status.connected");
                     }
-                    app.status = i18n::tr("wifi.status.connected");
+                    app.loading = false;
                 }
                 Err(e) => {
                     app.status = rust_i18n::t!("app.error", error = e).to_string();
@@ -806,7 +816,9 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Esc => {
+            app.loading = true;
             app.load_devices();
+            app.loading = false;
             app.open_device_select();
         }
         _ => {}
@@ -843,8 +855,13 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                 }
                 match crate::adb::wifi_connect(&app.adb, &endpoint) {
                     Ok(_) => {
+                        app.loading = true;
+                        app.status = i18n::tr("device.select.loading");
                         app.load_devices();
-                        if app.serial.is_none() {
+                        app.loading = false;
+                        if app.devices.iter().any(|d| d.serial == endpoint) {
+                            app.select_device(endpoint.clone());
+                        } else if app.serial.is_none() {
                             app.open_device_select();
                         }
                         app.wifi_connect_result = Some(ApkResult {
