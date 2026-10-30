@@ -27,8 +27,13 @@ curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main
 ## Install (from source)
 
 ```bash
-cargo build --release
+cargo build --release --locked
 ./target/release/alejandradb
+```
+
+Or install directly:
+```bash
+cargo +stable install --path . --locked
 ```
 
 > The Rust project lives in the `adbcli/` directory. The commands above assume you are inside that directory.

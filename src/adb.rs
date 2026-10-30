@@ -1045,6 +1045,7 @@ pub fn pull_remote(adb: &str, serial: &str, remote: &str, local: &str) -> Result
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn push_remote(adb: &str, serial: &str, local: &str, remote: &str) -> Result<()> {
     crate::validate::serial(serial)?;
     let status = Command::new(adb)

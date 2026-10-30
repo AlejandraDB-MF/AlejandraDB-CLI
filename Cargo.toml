@@ -2,7 +2,7 @@
 name = "alejandradb"
 version = "1.0.1"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "GPL-3.0-only"
 description = "TUI/CLI to manage Android devices via ADB"
 readme = "README.md"
