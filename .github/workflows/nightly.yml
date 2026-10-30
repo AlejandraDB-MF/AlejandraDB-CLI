@@ -34,7 +34,9 @@ jobs:
       - name: Short SHA
         id: sha
         shell: bash
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -107,7 +109,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         with:
-          tag_name: nightly-${{ github.sha }}
-          name: "Nightly (${{ github.sha }})"
+          tag_name: nightly-${{ steps.sha.outputs.date }}-${{ steps.sha.outputs.short }}
+          name: "Nightly ${{ steps.sha.outputs.date }} (${{ steps.sha.outputs.short }})"
           prerelease: true
           files: dist/*
