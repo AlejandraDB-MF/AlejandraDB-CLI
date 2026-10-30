@@ -44,6 +44,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Screen::WifiDiscover => render_wifi_discover(f, app, chunks[0]),
         Screen::WifiConnect => render_wifi_connect(f, app, chunks[0]),
         Screen::FileBrowser => render_file_browser(f, app, chunks[0]),
+        Screen::StorageMenu => render_storage_menu(f, app, chunks[0]),
+        Screen::StorageUsage => render_storage_usage(f, app, chunks[0]),
+        Screen::StorageVolumes => render_storage_volumes(f, app, chunks[0]),
     }
 
     if !app.status.is_empty() {
@@ -794,4 +797,44 @@ fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
     app.file_browser_state = state;
+}
+
+fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let items = list_items(&app.storage_menu_keys);
+    let mut state = app.storage_menu_state;
+    let list = List::new(items)
+        .block(menu_block(i18n::tr("storage.title")))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.storage_menu_state = state;
+    if app.storage_cache_input_mode {
+        // overlay simple: mostrar input en status ya; nada extra
+    }
+}
+
+fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    if app.storage_usage.is_empty() {
+        let para = Paragraph::new(i18n::tr("storage.usage.empty")).block(menu_block(i18n::tr("storage.usage.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    let mut items: Vec<ListItem> = Vec::new();
+    for (path, size) in &app.storage_usage {
+        let mb = *size as f64 / 1_048_576.0;
+        items.push(ListItem::new(format!("{}  {:.1} MB", path, mb)));
+    }
+    let list = List::new(items).block(menu_block(i18n::tr("storage.usage.title")));
+    f.render_widget(list, area);
+}
+
+fn render_storage_volumes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    if app.storage_volumes.is_empty() {
+        let para = Paragraph::new(i18n::tr("storage.volumes.empty")).block(menu_block(i18n::tr("storage.volumes.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    let items: Vec<ListItem> = app.storage_volumes.iter().map(|v| ListItem::new(v.clone())).collect();
+    let list = List::new(items).block(menu_block(i18n::tr("storage.volumes.title")));
+    f.render_widget(list, area);
 }

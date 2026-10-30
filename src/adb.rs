@@ -988,8 +988,9 @@ pub struct RemoteEntry {
 
 pub fn list_remote(adb: &str, serial: &str, path: &str) -> Result<Vec<RemoteEntry>> {
     crate::validate::serial(serial)?;
+    let target = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
     let out = Command::new(adb)
-        .args(["-s", serial, "shell", "ls", "-la", path])
+        .args(["-s", serial, "shell", "ls", "-la", &target])
         .output()
         .with_context(|| format!("failed 'ls {path}'"))?;
     let text = String::from_utf8_lossy(&out.stdout).to_string();
@@ -1071,6 +1072,17 @@ pub fn remove_remote(adb: &str, serial: &str, path: &str) -> Result<()> {
         bail!("rm failed: {path}");
     }
     Ok(())
+}
+
+pub fn du_remote(adb: &str, serial: &str, path: &str) -> Result<u64> {
+    crate::validate::serial(serial)?;
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "du", "-sb", path])
+        .output()
+        .with_context(|| format!("failed du {path}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let size = text.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+    Ok(size)
 }
 
 pub fn validate_remote_path(path: &str) -> bool {

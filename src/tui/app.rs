@@ -62,6 +62,9 @@ pub enum Screen {
     WifiDiscover,
     WifiConnect,
     FileBrowser,
+    StorageMenu,
+    StorageUsage,
+    StorageVolumes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +202,13 @@ pub struct App {
     pub file_browser_filter: String,
     pub file_browser_input_mode: bool,
     pub file_browser_input: String,
-    pub file_browser_pending_delete: Option<String>,    pub wifi_scan_progress: usize,
+    pub file_browser_pending_delete: Option<String>,
+    pub storage_usage: Vec<(String, u64)>,
+    pub storage_volumes: Vec<String>,
+    pub storage_cache_input: String,
+    pub storage_cache_input_mode: bool,
+    pub storage_menu_keys: Vec<&'static str>,
+    pub storage_menu_state: ListState,    pub wifi_scan_progress: usize,
 }
 
 impl App {
@@ -266,7 +275,7 @@ impl App {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
-                "device.menu.files",
+                "device.menu.storage",
                 "device.menu.back",
             ],
             device_menu_state,
@@ -364,6 +373,23 @@ impl App {
             file_browser_input_mode: false,
             file_browser_input: String::new(),
             file_browser_pending_delete: None,
+            storage_usage: Vec::new(),
+            storage_volumes: Vec::new(),
+            storage_cache_input: String::new(),
+            storage_cache_input_mode: false,
+            storage_menu_keys: vec![
+                "storage.menu.files",
+                "storage.menu.clear_cache",
+                "storage.menu.usage",
+                "storage.menu.volumes",
+                "storage.menu.clean",
+                "storage.menu.back",
+            ],
+            storage_menu_state: {
+                let mut s = ListState::default();
+                s.select(Some(0));
+                s
+            },
             wifi_scan_progress: 0,
         };
         app.refresh_network_menu();
@@ -916,6 +942,41 @@ impl App {
                 self.status = format!("Last scan: {}", at.elapsed().as_secs());
             }
         }
+    }
+
+    pub fn open_storage_menu(&mut self) {
+        self.screen = Screen::StorageMenu;
+        self.storage_menu_state.select(Some(0));
+        self.status = i18n::tr("storage.hint").to_string();
+    }
+
+    pub fn open_storage_usage(&mut self) {
+        self.screen = Screen::StorageUsage;
+        self.storage_usage.clear();
+        let serial = self.serial.clone().unwrap_or_default();
+        let adb = self.adb.clone();
+        let folders = ["/sdcard/DCIM", "/sdcard/Download", "/sdcard/Documents", "/sdcard/Movies", "/sdcard/Pictures", "/sdcard/Android/data"];
+        for f in folders {
+            let size = crate::adb::du_remote(&adb, &serial, f).unwrap_or(0);
+            self.storage_usage.push((f.to_string(), size));
+        }
+        self.storage_usage.sort_by(|a, b| b.1.cmp(&a.1));
+        self.status = i18n::tr("storage.usage.loaded").to_string();
+    }
+
+    pub fn open_storage_volumes(&mut self) {
+        self.screen = Screen::StorageVolumes;
+        self.storage_volumes.clear();
+        let serial = self.serial.clone().unwrap_or_default();
+        if let Ok(text) = crate::adb::sm_list_volumes(&self.adb, &serial) {
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    self.storage_volumes.push(line.to_string());
+                }
+            }
+        }
+        self.status = i18n::tr("storage.volumes.loaded").to_string();
     }
 
     pub fn open_file_browser(&mut self) {
@@ -2066,7 +2127,7 @@ mod tests {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
-                "device.menu.files",
+                "device.menu.storage",
                 "device.menu.back",
             ]
         );
