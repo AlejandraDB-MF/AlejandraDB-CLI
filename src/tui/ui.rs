@@ -809,9 +809,6 @@ fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
     app.storage_menu_state = state;
-    if app.storage_cache_input_mode {
-        // overlay simple: mostrar input en status ya; nada extra
-    }
 }
 
 fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {

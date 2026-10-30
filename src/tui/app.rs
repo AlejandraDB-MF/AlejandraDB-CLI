@@ -206,8 +206,6 @@ pub struct App {
     pub file_browser_pending_delete: Option<String>,
     pub storage_usage: Vec<(String, u64)>,
     pub storage_volumes: Vec<String>,
-    pub storage_cache_input: String,
-    pub storage_cache_input_mode: bool,
     pub storage_menu_keys: Vec<&'static str>,
     pub storage_menu_state: ListState,    pub wifi_scan_progress: usize,
 }
@@ -298,6 +296,7 @@ impl App {
                 "apps.menu.install",
                 "apps.menu.reinstall",
                 "apps.menu.enable",
+                "apps.menu.clear_cache",
             ],
             apps_menu_state,
             app_action: AppAction::Uninstall,
@@ -376,11 +375,8 @@ impl App {
             file_browser_pending_delete: None,
             storage_usage: Vec::new(),
             storage_volumes: Vec::new(),
-            storage_cache_input: String::new(),
-            storage_cache_input_mode: false,
             storage_menu_keys: vec![
                 "storage.menu.files",
-                "storage.menu.clear_cache",
                 "storage.menu.usage",
                 "storage.menu.volumes",
                 "storage.menu.clean",

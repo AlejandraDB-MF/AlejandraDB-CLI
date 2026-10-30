@@ -370,6 +370,18 @@ pub fn handle_apps_menu(app: &mut App, key: KeyEvent) {
                     app.status = i18n::tr("apps.status.help");
                     app.screen = Screen::AppList;
                 }
+                4 => {
+                    if let Err(e) = app.ensure_safety() {
+                        app.status = rust_i18n::t!("app.error", error = e).to_string();
+                    }
+                    app.app_action = AppAction::ClearCache;
+                    app.app_view = AppView::Installed;
+                    if !app.list_cache_matches(AppAction::ClearCache, AppView::Installed) {
+                        app.load_packages(false);
+                    }
+                    app.status = i18n::tr("apps.status.help");
+                    app.screen = Screen::AppList;
+                }
                 _ => {}
             }
         }
@@ -1137,48 +1149,6 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_storage_menu(app: &mut App, key: KeyEvent) {
-    if app.storage_cache_input_mode {
-        match key.code {
-            KeyCode::Char(c) => app.storage_cache_input.push(c),
-            KeyCode::Backspace => {
-                app.storage_cache_input.pop();
-            }
-            KeyCode::Enter => {
-                let pkg = app.storage_cache_input.trim().to_string();
-                app.storage_cache_input.clear();
-                app.storage_cache_input_mode = false;
-                if pkg.is_empty() {
-                    app.status = i18n::tr("storage.cache.empty").to_string();
-                    return;
-                }
-                if crate::validate::package(&pkg).is_err() {
-                    app.status = i18n::tr("storage.cache.invalid").to_string();
-                    return;
-                }
-                let serial = app.serial.clone().unwrap_or_default();
-                match (|| -> anyhow::Result<()> {
-                    let out = std::process::Command::new(&app.adb)
-                        .args(["-s", &serial, "shell", "pm", "clear", &pkg])
-                        .output()?;
-                    let text = String::from_utf8_lossy(&out.stdout).to_string()
-                        + &String::from_utf8_lossy(&out.stderr);
-                    if !text.to_lowercase().contains("success") {
-                        anyhow::bail!("{}", text.trim());
-                    }
-                    Ok(())
-                })() {
-                    Ok(_) => app.status = i18n::tr("storage.cache.done").to_string(),
-                    Err(e) => app.status = rust_i18n::t!("app.error", error = e).to_string(),
-                }
-            }
-            KeyCode::Esc => {
-                app.storage_cache_input.clear();
-                app.storage_cache_input_mode = false;
-            }
-            _ => {}
-        }
-        return;
-    }
     let len = app.storage_menu_keys.len();
     match key.code {
         KeyCode::Up => App::move_list(&mut app.storage_menu_state, len, -1),
@@ -1187,21 +1157,9 @@ pub fn handle_storage_menu(app: &mut App, key: KeyEvent) {
             let i = app.storage_menu_state.selected().unwrap_or(0);
             match i {
                 0 => app.open_file_browser(),
-                1 => {
-                    if let Err(e) = app.ensure_safety() {
-                        app.status = rust_i18n::t!("app.error", error = e).to_string();
-                    }
-                    app.app_action = AppAction::ClearCache;
-                    app.app_view = AppView::Installed;
-                    if !app.list_cache_matches(AppAction::ClearCache, AppView::Installed) {
-                        app.load_packages(false);
-                    }
-                    app.status = i18n::tr("apps.status.help").to_string();
-                    app.screen = Screen::AppList;
-                }
-                2 => app.open_storage_usage(),
-                3 => app.open_storage_volumes(),
-                4 => {
+                1 => app.open_storage_usage(),
+                2 => app.open_storage_volumes(),
+                3 => {
                     // Quick clean: borrar thumbnails
                     let serial = app.serial.clone().unwrap_or_default();
                     let path = "/sdcard/DCIM/.thumbnails".to_string();
@@ -1210,7 +1168,7 @@ pub fn handle_storage_menu(app: &mut App, key: KeyEvent) {
                         app.status = i18n::tr("storage.clean.done").to_string();
                     }
                 }
-                5 => app.screen = Screen::DeviceMenu,
+                4 => app.screen = Screen::DeviceMenu,
                 _ => {}
             }
         }
