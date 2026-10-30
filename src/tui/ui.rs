@@ -711,11 +711,13 @@ fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
             items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
         }
     } else if !app.wifi_rejected.is_empty() {
-        items.push(ListItem::new(format!(
-            "… {} rejected (press 'a' to show)",
-            app.wifi_rejected.len()
-        ))
-        .style(Style::default().fg(Color::DarkGray)));
+        items.push(
+            ListItem::new(format!(
+                "… {} rejected (press 'a' to show)",
+                app.wifi_rejected.len()
+            ))
+            .style(Style::default().fg(Color::DarkGray)),
+        );
     }
 
     let mut state = app.wifi_discover_state;
@@ -820,7 +822,8 @@ fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 
 fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     if app.storage_usage.is_empty() {
-        let para = Paragraph::new(i18n::tr("storage.usage.empty")).block(menu_block(i18n::tr("storage.usage.title")));
+        let para = Paragraph::new(i18n::tr("storage.usage.empty"))
+            .block(menu_block(i18n::tr("storage.usage.title")));
         f.render_widget(para, area);
         return;
     }
@@ -835,11 +838,16 @@ fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
 
 fn render_storage_volumes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     if app.storage_volumes.is_empty() {
-        let para = Paragraph::new(i18n::tr("storage.volumes.empty")).block(menu_block(i18n::tr("storage.volumes.title")));
+        let para = Paragraph::new(i18n::tr("storage.volumes.empty"))
+            .block(menu_block(i18n::tr("storage.volumes.title")));
         f.render_widget(para, area);
         return;
     }
-    let items: Vec<ListItem> = app.storage_volumes.iter().map(|v| ListItem::new(v.clone())).collect();
+    let items: Vec<ListItem> = app
+        .storage_volumes
+        .iter()
+        .map(|v| ListItem::new(v.clone()))
+        .collect();
     let list = List::new(items).block(menu_block(i18n::tr("storage.volumes.title")));
     f.render_widget(list, area);
 }

@@ -189,7 +189,8 @@ pub struct App {
     pub wifi_connect_input_mode: bool,
     pub wifi_connect_result: Option<ApkResult>,
     pub wifi_scanning: bool,
-    pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,    pub wifi_scan_results: Vec<String>,
+    pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,
+    pub wifi_scan_results: Vec<String>,
     pub wifi_rejected: Vec<String>,
     pub wifi_show_rejected: bool,
     pub wifi_subnet_input: String,
@@ -208,7 +209,8 @@ pub struct App {
     pub storage_usage: Vec<(String, u64)>,
     pub storage_volumes: Vec<String>,
     pub storage_menu_keys: Vec<&'static str>,
-    pub storage_menu_state: ListState,    pub wifi_scan_progress: usize,
+    pub storage_menu_state: ListState,
+    pub wifi_scan_progress: usize,
 }
 
 impl App {
@@ -934,7 +936,11 @@ impl App {
             if len == 0 {
                 self.wifi_discover_state.select(None);
             } else {
-                let sel = self.wifi_discover_state.selected().unwrap_or(0).min(len - 1);
+                let sel = self
+                    .wifi_discover_state
+                    .selected()
+                    .unwrap_or(0)
+                    .min(len - 1);
                 self.wifi_discover_state.select(Some(sel));
             }
             if let Some(at) = self.wifi_scan_last_at {
@@ -954,7 +960,14 @@ impl App {
         self.storage_usage.clear();
         let serial = self.serial.clone().unwrap_or_default();
         let adb = self.adb.clone();
-        let folders = ["/sdcard/DCIM", "/sdcard/Download", "/sdcard/Documents", "/sdcard/Movies", "/sdcard/Pictures", "/sdcard/Android/data"];
+        let folders = [
+            "/sdcard/DCIM",
+            "/sdcard/Download",
+            "/sdcard/Documents",
+            "/sdcard/Movies",
+            "/sdcard/Pictures",
+            "/sdcard/Android/data",
+        ];
         for f in folders {
             let size = crate::adb::du_remote(&adb, &serial, f).unwrap_or(0);
             self.storage_usage.push((f.to_string(), size));
@@ -988,7 +1001,11 @@ impl App {
     }
 
     pub fn load_file_browser(&mut self) {
-        match crate::adb::list_remote(&self.adb, self.serial.as_deref().unwrap_or(""), &self.file_browser_path) {
+        match crate::adb::list_remote(
+            &self.adb,
+            self.serial.as_deref().unwrap_or(""),
+            &self.file_browser_path,
+        ) {
             Ok(entries) => {
                 self.file_browser_entries = entries;
                 self.file_browser_loading = false;
@@ -1343,12 +1360,20 @@ impl App {
 
     fn auto_serial(&self) -> Option<String> {
         if let Some(serial) = &self.serial_override
-            && let Some(device) = self.devices.iter().find(|d| d.serial == *serial && d.state == "device")        {
+            && let Some(device) = self
+                .devices
+                .iter()
+                .find(|d| d.serial == *serial && d.state == "device")
+        {
             return Some(device.serial.clone());
         }
         if let Ok(env_serial) = std::env::var("ANDROID_SERIAL")
             && !env_serial.is_empty()
-            && let Some(device) = self.devices.iter().find(|d| d.serial == env_serial && d.state == "device")        {
+            && let Some(device) = self
+                .devices
+                .iter()
+                .find(|d| d.serial == env_serial && d.state == "device")
+        {
             return Some(device.serial.clone());
         }
         None

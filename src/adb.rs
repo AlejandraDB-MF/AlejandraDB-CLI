@@ -988,13 +988,18 @@ pub struct RemoteEntry {
 
 pub fn list_remote(adb: &str, serial: &str, path: &str) -> Result<Vec<RemoteEntry>> {
     crate::validate::serial(serial)?;
-    let target = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
+    let target = if path.ends_with('/') {
+        path.to_string()
+    } else {
+        format!("{path}/")
+    };
     let out = Command::new(adb)
         .args(["-s", serial, "shell", "ls", "-la", &target])
         .output()
         .with_context(|| format!("failed 'ls {path}'"))?;
     let text = String::from_utf8_lossy(&out.stdout).to_string();
-    if text.trim().is_empty() || text.contains("No such file") || text.contains("Permission denied") {
+    if text.trim().is_empty() || text.contains("No such file") || text.contains("Permission denied")
+    {
         return Ok(Vec::new());
     }
     Ok(parse_remote_ls(&text))
@@ -1011,7 +1016,12 @@ pub fn parse_remote_ls(text: &str) -> Vec<RemoteEntry> {
         if parts.len() < 6 {
             if let Some(name) = parts.last() {
                 if *name != "." && *name != ".." {
-                    result.push(RemoteEntry { name: name.to_string(), is_dir: false, size: 0, modified: String::new() });
+                    result.push(RemoteEntry {
+                        name: name.to_string(),
+                        is_dir: false,
+                        size: 0,
+                        modified: String::new(),
+                    });
                 }
             }
             continue;
@@ -1029,7 +1039,12 @@ pub fn parse_remote_ls(text: &str) -> Vec<RemoteEntry> {
         if name == "." || name == ".." || name.is_empty() {
             continue;
         }
-        result.push(RemoteEntry { name, is_dir, size, modified });
+        result.push(RemoteEntry {
+            name,
+            is_dir,
+            size,
+            modified,
+        });
     }
     result
 }
@@ -1081,7 +1096,12 @@ pub fn du_remote(adb: &str, serial: &str, path: &str) -> Result<u64> {
         .output()
         .with_context(|| format!("failed du {path}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
-    let size = text.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+    let size = text
+        .split_whitespace()
+        .next()
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
     Ok(size)
 }
 

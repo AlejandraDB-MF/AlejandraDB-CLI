@@ -47,10 +47,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Screen::Network => handle_network(app, key),
         Screen::WifiDiscover => handle_wifi_discover(app, key),
         Screen::WifiConnect => handle_wifi_connect(app, key),
-    Screen::FileBrowser => handle_file_browser(app, key),
-    Screen::StorageMenu => handle_storage_menu(app, key),
-    Screen::StorageUsage => handle_storage_usage(app, key),
-    Screen::StorageVolumes => handle_storage_volumes(app, key),
+        Screen::FileBrowser => handle_file_browser(app, key),
+        Screen::StorageMenu => handle_storage_menu(app, key),
+        Screen::StorageUsage => handle_storage_usage(app, key),
+        Screen::StorageVolumes => handle_storage_volumes(app, key),
     }
 }
 
@@ -81,11 +81,7 @@ pub fn handle_device_select(app: &mut App, key: KeyEvent) {
                 }
                 let device = &app.devices[selected];
                 if device.state != "device" {
-                    app.status = format!(
-                        "{} ({})",
-                        i18n::tr("app.status.no_device"),
-                        device.state
-                    );
+                    app.status = format!("{} ({})", i18n::tr("app.status.no_device"), device.state);
                     return;
                 }
                 let serial = device.serial.clone();
@@ -808,7 +804,11 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
             if new_len == 0 {
                 app.wifi_discover_state.select(None);
             } else {
-                let sel = app.wifi_discover_state.selected().unwrap_or(0).min(new_len - 1);
+                let sel = app
+                    .wifi_discover_state
+                    .selected()
+                    .unwrap_or(0)
+                    .min(new_len - 1);
                 app.wifi_discover_state.select(Some(sel));
             }
         }
@@ -847,11 +847,8 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
                             if app.serial.is_none() {
                                 app.open_device_select();
                             }
-                            app.status = format!(
-                                "{} ({})",
-                                i18n::tr("wifi.status.connected"),
-                                state
-                            );
+                            app.status =
+                                format!("{} ({})", i18n::tr("wifi.status.connected"), state);
                         }
                     } else if app.serial.is_none() {
                         app.open_device_select();
@@ -925,17 +922,11 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                                 app.select_device(endpoint.clone());
                             } else if app.serial.is_none() {
                                 app.open_device_select();
-                                app.status = format!(
-                                    "{} ({})",
-                                    i18n::tr("wifi.status.connected"),
-                                    state
-                                );
+                                app.status =
+                                    format!("{} ({})", i18n::tr("wifi.status.connected"), state);
                             } else {
-                                app.status = format!(
-                                    "{} ({})",
-                                    i18n::tr("wifi.status.connected"),
-                                    state
-                                );
+                                app.status =
+                                    format!("{} ({})", i18n::tr("wifi.status.connected"), state);
                             }
                         } else if app.serial.is_none() {
                             app.open_device_select();
@@ -1022,7 +1013,11 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Some(path) = app.file_browser_pending_delete.take() {
                     if crate::adb::validate_remote_path(&path) {
-                        let _ = crate::adb::remove_remote(&app.adb, app.serial.as_deref().unwrap_or(""), &path);
+                        let _ = crate::adb::remove_remote(
+                            &app.adb,
+                            app.serial.as_deref().unwrap_or(""),
+                            &path,
+                        );
                     }
                     app.load_file_browser();
                 }
@@ -1142,9 +1137,22 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             if entry.is_dir {
                 return;
             }
-            let remote = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
-            let local = format!("{}/{}", std::env::var("HOME").unwrap_or_default(), entry.name);
-            match crate::adb::pull_remote(&app.adb, app.serial.as_deref().unwrap_or(""), &remote, &local) {
+            let remote = format!(
+                "{}/{}",
+                app.file_browser_path.trim_end_matches('/'),
+                entry.name
+            );
+            let local = format!(
+                "{}/{}",
+                std::env::var("HOME").unwrap_or_default(),
+                entry.name
+            );
+            match crate::adb::pull_remote(
+                &app.adb,
+                app.serial.as_deref().unwrap_or(""),
+                &remote,
+                &local,
+            ) {
                 Ok(_) => app.status = i18n::tr("files.pull_done").to_string(),
                 Err(e) => app.status = rust_i18n::t!("app.error", error = e).to_string(),
             }
@@ -1158,7 +1166,11 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
             let idx = filtered[sel];
             let entry = &app.file_browser_entries[idx];
-            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            let path = format!(
+                "{}/{}",
+                app.file_browser_path.trim_end_matches('/'),
+                entry.name
+            );
             app.file_browser_clipboard = Some((path, false));
             app.status = format!("Copied: {}", entry.name);
         }
@@ -1171,7 +1183,11 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
             let idx = filtered[sel];
             let entry = &app.file_browser_entries[idx];
-            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            let path = format!(
+                "{}/{}",
+                app.file_browser_path.trim_end_matches('/'),
+                entry.name
+            );
             app.file_browser_clipboard = Some((path, true));
             app.status = format!("Cut: {}", entry.name);
         }
@@ -1207,7 +1223,11 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
             let idx = filtered[sel];
             let entry = &app.file_browser_entries[idx];
-            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            let path = format!(
+                "{}/{}",
+                app.file_browser_path.trim_end_matches('/'),
+                entry.name
+            );
             if crate::adb::validate_remote_path(&path) {
                 app.file_browser_pending_delete = Some(path);
                 app.status = i18n::tr("files.delete_confirm").to_string();
