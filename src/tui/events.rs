@@ -1149,6 +1149,55 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
                 Err(e) => app.status = rust_i18n::t!("app.error", error = e).to_string(),
             }
         }
+        KeyCode::Char('c') | KeyCode::Char('C') => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            app.file_browser_clipboard = Some((path, false));
+            app.status = format!("Copied: {}", entry.name);
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            app.file_browser_clipboard = Some((path, true));
+            app.status = format!("Cut: {}", entry.name);
+        }
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            let Some((src, is_move)) = app.file_browser_clipboard.clone() else {
+                return;
+            };
+            let name = src.rsplit('/').next().unwrap_or("file").to_string();
+            let dst = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), name);
+            let serial = app.serial.as_deref().unwrap_or("");
+            let res = if is_move {
+                crate::adb::move_remote(&app.adb, serial, &src, &dst)
+            } else {
+                crate::adb::copy_remote(&app.adb, serial, &src, &dst)
+            };
+            match res {
+                Ok(_) => {
+                    if is_move {
+                        app.file_browser_clipboard = None;
+                    }
+                    app.status = format!("Pasted: {}", name);
+                    app.load_file_browser();
+                }
+                Err(e) => app.status = rust_i18n::t!("app.error", error = e).to_string(),
+            }
+        }
         KeyCode::Char('x') | KeyCode::Char('X') => {
             let Some(sel) = app.file_browser_state.selected() else {
                 return;

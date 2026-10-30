@@ -204,6 +204,7 @@ pub struct App {
     pub file_browser_input_mode: bool,
     pub file_browser_input: String,
     pub file_browser_pending_delete: Option<String>,
+    pub file_browser_clipboard: Option<(String, bool)>,
     pub storage_usage: Vec<(String, u64)>,
     pub storage_volumes: Vec<String>,
     pub storage_menu_keys: Vec<&'static str>,
@@ -373,6 +374,7 @@ impl App {
             file_browser_input_mode: false,
             file_browser_input: String::new(),
             file_browser_pending_delete: None,
+            file_browser_clipboard: None,
             storage_usage: Vec::new(),
             storage_volumes: Vec::new(),
             storage_menu_keys: vec![
@@ -979,7 +981,9 @@ impl App {
     pub fn open_file_browser(&mut self) {
         self.screen = Screen::FileBrowser;
         self.file_browser_loading = true;
-        self.status = "↑↓ navegar  ← subir  → entrar  d descargar  x borrar  r refrescar  / filtrar  Esc salir".to_string();
+        self.status = "↑↓ navegar  ← subir  → entrar  d descargar  c copiar  m mover  v pegar  x borrar  r refrescar  / filtrar  Esc salir".to_string();
+        self.file_browser_pending_delete = None;
+        self.file_browser_clipboard = None;
         self.load_file_browser();
     }
 

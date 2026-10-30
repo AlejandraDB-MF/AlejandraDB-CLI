@@ -791,13 +791,20 @@ fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         };
         items.push(ListItem::new(format!("{} {}{}", icon, e.name, size)));
     }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(area);
     let mut state = app.file_browser_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(list, chunks[0], &mut state);
     app.file_browser_state = state;
+    let help = "↑↓ navegar  ← subir  → entrar  d descargar  c copiar  m mover  v pegar  x borrar  r refrescar  / filtrar  Esc salir";
+    let para = Paragraph::new(help).block(menu_block("Help".to_string()));
+    f.render_widget(para, chunks[1]);
 }
 
 fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {

@@ -1085,6 +1085,36 @@ pub fn du_remote(adb: &str, serial: &str, path: &str) -> Result<u64> {
     Ok(size)
 }
 
+pub fn copy_remote(adb: &str, serial: &str, src: &str, dst: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    if !validate_remote_path(src) || !validate_remote_path(dst) {
+        bail!("invalid path");
+    }
+    let status = Command::new(adb)
+        .args(["-s", serial, "shell", "cp", "-r", src, dst])
+        .status()
+        .with_context(|| format!("failed cp {src}"))?;
+    if !status.success() {
+        bail!("cp failed: {src}");
+    }
+    Ok(())
+}
+
+pub fn move_remote(adb: &str, serial: &str, src: &str, dst: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    if !validate_remote_path(src) || !validate_remote_path(dst) {
+        bail!("invalid path");
+    }
+    let status = Command::new(adb)
+        .args(["-s", serial, "shell", "mv", src, dst])
+        .status()
+        .with_context(|| format!("failed mv {src}"))?;
+    if !status.success() {
+        bail!("mv failed: {src}");
+    }
+    Ok(())
+}
+
 pub fn validate_remote_path(path: &str) -> bool {
     let p = path.trim();
     if p.is_empty() || p == "/" {
