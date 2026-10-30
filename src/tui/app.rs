@@ -191,7 +191,7 @@ pub struct App {
     pub wifi_subnet_input: String,
     pub wifi_subnet_input_mode: bool,
     pub wifi_scan_start: Option<Instant>,
-    pub wifi_scan_progress: usize,
+    pub wifi_scan_last_at: Option<Instant>,    pub wifi_scan_progress: usize,
 }
 
 impl App {
@@ -342,6 +342,7 @@ impl App {
             wifi_subnet_input: String::new(),
             wifi_subnet_input_mode: false,
             wifi_scan_start: None,
+            wifi_scan_last_at: None,
             wifi_scan_progress: 0,
         };
         app.refresh_network_menu();
@@ -873,14 +874,27 @@ impl App {
 
     pub fn open_wifi_discover(&mut self) {
         self.screen = Screen::WifiDiscover;
-        self.wifi_discover_state.select(Some(0));
-        self.wifi_discovered.clear();
-        self.wifi_rejected.clear();
-        self.wifi_show_rejected = false;
-        self.wifi_scan_results.clear();
-        self.wifi_scan_progress = 0;
-        self.wifi_scan_start = Some(Instant::now());
-        self.start_wifi_scan();
+        if self.wifi_discovered.is_empty() && self.wifi_rejected.is_empty() {
+            self.wifi_discover_state.select(Some(0));
+            self.wifi_show_rejected = false;
+            self.wifi_scan_results.clear();
+            self.wifi_scan_progress = 0;
+            self.wifi_scan_start = Some(Instant::now());
+            self.start_wifi_scan();
+        } else {
+            // Reutilizar resultados previos sin re-escanear.
+            self.wifi_show_rejected = false;
+            let len = self.wifi_discovered.len();
+            if len == 0 {
+                self.wifi_discover_state.select(None);
+            } else {
+                let sel = self.wifi_discover_state.selected().unwrap_or(0).min(len - 1);
+                self.wifi_discover_state.select(Some(sel));
+            }
+            if let Some(at) = self.wifi_scan_last_at {
+                self.status = format!("Last scan: {}", at.elapsed().as_secs());
+            }
+        }
     }
 
     pub fn start_wifi_scan(&mut self) {
@@ -931,6 +945,7 @@ impl App {
             self.wifi_scanning = false;
             self.wifi_scan_rx = None;
             self.wifi_scan_start = None;
+            self.wifi_scan_last_at = Some(Instant::now());
             self.wifi_discovered.sort();
             self.wifi_rejected.sort();
             if self.wifi_discovered.is_empty() && self.wifi_rejected.is_empty() {

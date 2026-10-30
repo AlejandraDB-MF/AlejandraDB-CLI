@@ -795,6 +795,9 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
             match crate::adb::wifi_connect(&app.adb, &endpoint) {
                 Ok(_) => {
                     app.load_devices();
+                    if app.serial.is_none() {
+                        app.open_device_select();
+                    }
                     app.status = i18n::tr("wifi.status.connected");
                 }
                 Err(e) => {
@@ -803,6 +806,7 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Esc => {
+            app.load_devices();
             app.open_device_select();
         }
         _ => {}
@@ -840,6 +844,9 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                 match crate::adb::wifi_connect(&app.adb, &endpoint) {
                     Ok(_) => {
                         app.load_devices();
+                        if app.serial.is_none() {
+                            app.open_device_select();
+                        }
                         app.wifi_connect_result = Some(ApkResult {
                             text: i18n::tr("wifi.status.connected"),
                             is_error: false,
