@@ -70,12 +70,19 @@ fn prop_value(adb: &str, serial: &str, key: &str) -> String {
     if crate::validate::serial(serial).is_err() {
         return String::new();
     }
-    match Command::new(adb)
-        .args(["-s", serial, "shell", "getprop", key])
-        .output()
-    {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        Err(_) => String::new(),
+    let adb = adb.to_string();
+    let serial = serial.to_string();
+    let key = key.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = Command::new(&adb)
+            .args(["-s", &serial, "shell", "getprop", &key])
+            .output();
+        let _ = tx.send(out);
+    });
+    match rx.recv_timeout(std::time::Duration::from_millis(2000)) {
+        Ok(Ok(out)) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => String::new(),
     }
 }
 
@@ -230,11 +237,20 @@ pub fn power_off(adb: &str, serial: &str) -> Result<()> {
 
 pub fn getprop(adb: &str, serial: &str) -> Result<String> {
     crate::validate::serial(serial)?;
-    let out = Command::new(adb)
-        .args(["-s", serial, "shell", "getprop"])
-        .output()
-        .with_context(|| rust_i18n::t!("adb.error.getprop").to_string())?;
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    let adb = adb.to_string();
+    let serial = serial.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = Command::new(&adb)
+            .args(["-s", &serial, "shell", "getprop"])
+            .output();
+        let _ = tx.send(out);
+    });
+    match rx.recv_timeout(std::time::Duration::from_millis(4000)) {
+        Ok(Ok(out)) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => Ok(String::new()),
+    }
 }
 
 pub fn dumpsys_battery(adb: &str, serial: &str) -> Result<String> {
@@ -957,6 +973,223 @@ mod wifi_adb_parse_tests {
         let text = "List of devices attached\nemulator-5554\tdevice\n192.168.1.10:5555\tdevice\n192.168.1.11:5555\toffline\n192.168.1.10:5555\tdevice\n";
         let result = parse_wifi_adb_endpoints(text);
         assert_eq!(result, vec!["192.168.1.10:5555".to_string()]);
+    }
+}
+
+// ---------- File browser helpers ----------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: String,
+}
+
+pub fn list_remote(adb: &str, serial: &str, path: &str) -> Result<Vec<RemoteEntry>> {
+    crate::validate::serial(serial)?;
+    let target = if path.ends_with('/') {
+        path.to_string()
+    } else {
+        format!("{path}/")
+    };
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "ls", "-la", &target])
+        .output()
+        .with_context(|| format!("failed 'ls {path}'"))?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    if text.trim().is_empty() || text.contains("No such file") || text.contains("Permission denied")
+    {
+        return Ok(Vec::new());
+    }
+    Ok(parse_remote_ls(&text))
+}
+
+pub fn parse_remote_ls(text: &str) -> Vec<RemoteEntry> {
+    let mut result = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("total") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 6 {
+            if let Some(name) = parts.last()
+                && *name != "."
+                && *name != ".."
+            {
+                result.push(RemoteEntry {
+                    name: name.to_string(),
+                    is_dir: false,
+                    size: 0,
+                    modified: String::new(),
+                });
+            }
+            continue;
+        }
+        let perms = parts[0];
+        let is_dir = perms.starts_with('d');
+        let size: u64 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let modified = if parts.len() >= 8 {
+            format!("{} {}", parts[5], parts[6])
+        } else {
+            parts.get(5).unwrap_or(&"").to_string()
+        };
+        let name_start = if parts.len() >= 8 { 7 } else { 6 };
+        let name = parts[name_start..].join(" ");
+        if name == "." || name == ".." || name.is_empty() {
+            continue;
+        }
+        result.push(RemoteEntry {
+            name,
+            is_dir,
+            size,
+            modified,
+        });
+    }
+    result
+}
+
+pub fn pull_remote(adb: &str, serial: &str, remote: &str, local: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    let status = Command::new(adb)
+        .args(["-s", serial, "pull", remote, local])
+        .status()
+        .with_context(|| format!("failed pull {remote}"))?;
+    if !status.success() {
+        bail!("pull failed: {remote}");
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn push_remote(adb: &str, serial: &str, local: &str, remote: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    let status = Command::new(adb)
+        .args(["-s", serial, "push", local, remote])
+        .status()
+        .with_context(|| format!("failed push {local}"))?;
+    if !status.success() {
+        bail!("push failed: {local}");
+    }
+    Ok(())
+}
+
+pub fn remove_remote(adb: &str, serial: &str, path: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    if path == "/" || path == "/system" || path == "/data" || path == "/proc" || path == "/dev" {
+        bail!("refusing to remove critical path: {path}");
+    }
+    let status = Command::new(adb)
+        .args(["-s", serial, "shell", "rm", "-rf", path])
+        .status()
+        .with_context(|| format!("failed rm {path}"))?;
+    if !status.success() {
+        bail!("rm failed: {path}");
+    }
+    Ok(())
+}
+
+pub fn du_remote(adb: &str, serial: &str, path: &str) -> Result<u64> {
+    crate::validate::serial(serial)?;
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "du", "-sb", path])
+        .output()
+        .with_context(|| format!("failed du {path}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let size = text
+        .split_whitespace()
+        .next()
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
+    Ok(size)
+}
+
+pub fn copy_remote(adb: &str, serial: &str, src: &str, dst: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    if !validate_remote_path(src) || !validate_remote_path(dst) {
+        bail!("invalid path");
+    }
+    let status = Command::new(adb)
+        .args(["-s", serial, "shell", "cp", "-r", src, dst])
+        .status()
+        .with_context(|| format!("failed cp {src}"))?;
+    if !status.success() {
+        bail!("cp failed: {src}");
+    }
+    Ok(())
+}
+
+pub fn move_remote(adb: &str, serial: &str, src: &str, dst: &str) -> Result<()> {
+    crate::validate::serial(serial)?;
+    if !validate_remote_path(src) || !validate_remote_path(dst) {
+        bail!("invalid path");
+    }
+    let status = Command::new(adb)
+        .args(["-s", serial, "shell", "mv", src, dst])
+        .status()
+        .with_context(|| format!("failed mv {src}"))?;
+    if !status.success() {
+        bail!("mv failed: {src}");
+    }
+    Ok(())
+}
+
+pub fn validate_remote_path(path: &str) -> bool {
+    let p = path.trim();
+    if p.is_empty() || p == "/" {
+        return false;
+    }
+    if p.contains("..") {
+        return false;
+    }
+    let blocked = ["/system", "/proc", "/dev", "/vendor", "/sys"];
+    for b in blocked {
+        if p == b || p.starts_with(&format!("{b}/")) {
+            return false;
+        }
+    }
+    if p == "/data" || (p.starts_with("/data/") && !p.starts_with("/data/local/tmp")) {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+mod file_browser_tests {
+    use super::*;
+
+    #[test]
+    fn parse_remote_ls_basic() {
+        let text = "total 12\n\
+drwxr-xr-x 2 root root 4096 2026-10-28 10:15 DCIM\n\
+-rw-r--r-- 1 root root 1234 2026-10-28 10:15 report.pdf\n";
+        let result = parse_remote_ls(text);
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_dir);
+        assert_eq!(result[0].name, "DCIM");
+        assert!(!result[1].is_dir);
+        assert_eq!(result[1].name, "report.pdf");
+        assert_eq!(result[1].size, 1234);
+    }
+
+    #[test]
+    fn parse_remote_ls_empty() {
+        let text = "total 0\n";
+        let result = parse_remote_ls(text);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn validate_remote_path_rejects() {
+        assert!(!validate_remote_path("/"));
+        assert!(!validate_remote_path("/system"));
+        assert!(!validate_remote_path("/data"));
+        assert!(!validate_remote_path("/foo/../bar"));
+        assert!(!validate_remote_path(""));
+        assert!(validate_remote_path("/sdcard/Download"));
+        assert!(validate_remote_path("/data/local/tmp"));
     }
 }
 

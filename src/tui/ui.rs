@@ -43,6 +43,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Screen::Network => render_network(f, app, chunks[0]),
         Screen::WifiDiscover => render_wifi_discover(f, app, chunks[0]),
         Screen::WifiConnect => render_wifi_connect(f, app, chunks[0]),
+        Screen::FileBrowser => render_file_browser(f, app, chunks[0]),
+        Screen::StorageMenu => render_storage_menu(f, app, chunks[0]),
+        Screen::StorageUsage => render_storage_usage(f, app, chunks[0]),
+        Screen::StorageVolumes => render_storage_volumes(f, app, chunks[0]),
     }
 
     if !app.status.is_empty() {
@@ -79,14 +83,14 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         .devices
         .iter()
         .map(|d| {
-            let wifi = if d.serial.contains(':') {
+            let conn = if d.serial.contains(':') {
                 " (Wi-Fi)"
             } else {
-                ""
+                " (USB)"
             };
             ListItem::new(format!(
                 "{} {} ({}) [{}]{}",
-                d.manufacturer, d.model, d.serial, d.state, wifi
+                d.manufacturer, d.model, d.serial, d.state, conn
             ))
         })
         .collect();
@@ -395,6 +399,7 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         AppAction::Uninstall => i18n::tr("apps.action.uninstall"),
         AppAction::Reinstall => i18n::tr("apps.action.reinstall"),
         AppAction::Enable => i18n::tr("apps.action.enable"),
+        AppAction::ClearCache => i18n::tr("storage.cache.title"),
     };
     // Uninstall view shows all installed packages (system apps included, marked).
     let uninstall_all =
@@ -659,7 +664,12 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let title = i18n::tr("wifi.discover.title");
+    let mut title = i18n::tr("wifi.discover.title").to_string();
+    if !app.wifi_scanning
+        && let Some(at) = app.wifi_scan_last_at
+    {
+        title = format!("{} (last scan {}s ago)", title, at.elapsed().as_secs());
+    }
     if app.wifi_scanning {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = if let Some(start) = app.wifi_scan_start {
@@ -696,8 +706,18 @@ fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
     for e in &app.wifi_discovered {
         items.push(ListItem::new(format!("✓ {}", e)).style(Style::default().fg(Color::Green)));
     }
-    for e in &app.wifi_rejected {
-        items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
+    if app.wifi_show_rejected {
+        for e in &app.wifi_rejected {
+            items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
+        }
+    } else if !app.wifi_rejected.is_empty() {
+        items.push(
+            ListItem::new(format!(
+                "… {} rejected (press 'a' to show)",
+                app.wifi_rejected.len()
+            ))
+            .style(Style::default().fg(Color::DarkGray)),
+        );
     }
 
     let mut state = app.wifi_discover_state;
@@ -745,4 +765,89 @@ fn render_wifi_connect(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .block(block)
         .wrap(Wrap { trim: false });
     f.render_widget(para, area);
+}
+
+fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = format!("Files: {}", app.file_browser_path);
+    if app.file_browser_loading {
+        let para = Paragraph::new(i18n::tr("files.loading")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    if app.file_browser_entries.is_empty() {
+        let para = Paragraph::new(i18n::tr("files.empty")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    let filter = app.file_browser_filter.to_lowercase();
+    let mut items: Vec<ListItem> = Vec::new();
+    for e in &app.file_browser_entries {
+        if !filter.is_empty() && !e.name.to_lowercase().contains(&filter) {
+            continue;
+        }
+        let icon = if e.is_dir { "📁" } else { "📄" };
+        let size = if e.is_dir {
+            String::new()
+        } else {
+            format!("  {} B", e.size)
+        };
+        items.push(ListItem::new(format!("{} {}{}", icon, e.name, size)));
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(area);
+    let mut state = app.file_browser_state;
+    let list = List::new(items)
+        .block(menu_block(title))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, chunks[0], &mut state);
+    app.file_browser_state = state;
+    let help = "↑↓ navegar  ← subir  → entrar  d descargar  c copiar  m mover  v pegar  x borrar  r refrescar  / filtrar  Esc salir";
+    let para = Paragraph::new(help).block(menu_block("Help".to_string()));
+    f.render_widget(para, chunks[1]);
+}
+
+fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let items = list_items(&app.storage_menu_keys);
+    let mut state = app.storage_menu_state;
+    let list = List::new(items)
+        .block(menu_block(i18n::tr("storage.title")))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.storage_menu_state = state;
+}
+
+fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    if app.storage_usage.is_empty() {
+        let para = Paragraph::new(i18n::tr("storage.usage.empty"))
+            .block(menu_block(i18n::tr("storage.usage.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    let mut items: Vec<ListItem> = Vec::new();
+    for (path, size) in &app.storage_usage {
+        let mb = *size as f64 / 1_048_576.0;
+        items.push(ListItem::new(format!("{}  {:.1} MB", path, mb)));
+    }
+    let list = List::new(items).block(menu_block(i18n::tr("storage.usage.title")));
+    f.render_widget(list, area);
+}
+
+fn render_storage_volumes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    if app.storage_volumes.is_empty() {
+        let para = Paragraph::new(i18n::tr("storage.volumes.empty"))
+            .block(menu_block(i18n::tr("storage.volumes.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    let items: Vec<ListItem> = app
+        .storage_volumes
+        .iter()
+        .map(|v| ListItem::new(v.clone()))
+        .collect();
+    let list = List::new(items).block(menu_block(i18n::tr("storage.volumes.title")));
+    f.render_widget(list, area);
 }

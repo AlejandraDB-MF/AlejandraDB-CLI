@@ -22,6 +22,7 @@ pub enum AppAction {
     Uninstall,
     Reinstall,
     Enable,
+    ClearCache,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +62,10 @@ pub enum Screen {
     Network,
     WifiDiscover,
     WifiConnect,
+    FileBrowser,
+    StorageMenu,
+    StorageUsage,
+    StorageVolumes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,9 +192,24 @@ pub struct App {
     pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,
     pub wifi_scan_results: Vec<String>,
     pub wifi_rejected: Vec<String>,
+    pub wifi_show_rejected: bool,
     pub wifi_subnet_input: String,
     pub wifi_subnet_input_mode: bool,
     pub wifi_scan_start: Option<Instant>,
+    pub wifi_scan_last_at: Option<Instant>,
+    pub file_browser_path: String,
+    pub file_browser_entries: Vec<crate::adb::RemoteEntry>,
+    pub file_browser_state: ListState,
+    pub file_browser_loading: bool,
+    pub file_browser_filter: String,
+    pub file_browser_input_mode: bool,
+    pub file_browser_input: String,
+    pub file_browser_pending_delete: Option<String>,
+    pub file_browser_clipboard: Option<(String, bool)>,
+    pub storage_usage: Vec<(String, u64)>,
+    pub storage_volumes: Vec<String>,
+    pub storage_menu_keys: Vec<&'static str>,
+    pub storage_menu_state: ListState,
     pub wifi_scan_progress: usize,
 }
 
@@ -257,6 +277,7 @@ impl App {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
+                "device.menu.storage",
                 "device.menu.back",
             ],
             device_menu_state,
@@ -278,6 +299,7 @@ impl App {
                 "apps.menu.install",
                 "apps.menu.reinstall",
                 "apps.menu.enable",
+                "apps.menu.clear_cache",
             ],
             apps_menu_state,
             app_action: AppAction::Uninstall,
@@ -337,9 +359,38 @@ impl App {
             wifi_scan_rx: None,
             wifi_scan_results: Vec::new(),
             wifi_rejected: Vec::new(),
+            wifi_show_rejected: false,
             wifi_subnet_input: String::new(),
             wifi_subnet_input_mode: false,
             wifi_scan_start: None,
+            wifi_scan_last_at: None,
+            file_browser_path: "/sdcard".to_string(),
+            file_browser_entries: Vec::new(),
+            file_browser_state: {
+                let mut s = ListState::default();
+                s.select(Some(0));
+                s
+            },
+            file_browser_loading: false,
+            file_browser_filter: String::new(),
+            file_browser_input_mode: false,
+            file_browser_input: String::new(),
+            file_browser_pending_delete: None,
+            file_browser_clipboard: None,
+            storage_usage: Vec::new(),
+            storage_volumes: Vec::new(),
+            storage_menu_keys: vec![
+                "storage.menu.files",
+                "storage.menu.usage",
+                "storage.menu.volumes",
+                "storage.menu.clean",
+                "storage.menu.back",
+            ],
+            storage_menu_state: {
+                let mut s = ListState::default();
+                s.select(Some(0));
+                s
+            },
             wifi_scan_progress: 0,
         };
         app.refresh_network_menu();
@@ -871,13 +922,106 @@ impl App {
 
     pub fn open_wifi_discover(&mut self) {
         self.screen = Screen::WifiDiscover;
-        self.wifi_discover_state.select(Some(0));
-        self.wifi_discovered.clear();
-        self.wifi_rejected.clear();
-        self.wifi_scan_results.clear();
-        self.wifi_scan_progress = 0;
-        self.wifi_scan_start = Some(Instant::now());
-        self.start_wifi_scan();
+        if self.wifi_discovered.is_empty() && self.wifi_rejected.is_empty() {
+            self.wifi_discover_state.select(Some(0));
+            self.wifi_show_rejected = false;
+            self.wifi_scan_results.clear();
+            self.wifi_scan_progress = 0;
+            self.wifi_scan_start = Some(Instant::now());
+            self.start_wifi_scan();
+        } else {
+            // Reutilizar resultados previos sin re-escanear.
+            self.wifi_show_rejected = false;
+            let len = self.wifi_discovered.len();
+            if len == 0 {
+                self.wifi_discover_state.select(None);
+            } else {
+                let sel = self
+                    .wifi_discover_state
+                    .selected()
+                    .unwrap_or(0)
+                    .min(len - 1);
+                self.wifi_discover_state.select(Some(sel));
+            }
+            if let Some(at) = self.wifi_scan_last_at {
+                self.status = format!("Last scan: {}", at.elapsed().as_secs());
+            }
+        }
+    }
+
+    pub fn open_storage_menu(&mut self) {
+        self.screen = Screen::StorageMenu;
+        self.storage_menu_state.select(Some(0));
+        self.status = i18n::tr("storage.hint").to_string();
+    }
+
+    pub fn open_storage_usage(&mut self) {
+        self.screen = Screen::StorageUsage;
+        self.storage_usage.clear();
+        let serial = self.serial.clone().unwrap_or_default();
+        let adb = self.adb.clone();
+        let folders = [
+            "/sdcard/DCIM",
+            "/sdcard/Download",
+            "/sdcard/Documents",
+            "/sdcard/Movies",
+            "/sdcard/Pictures",
+            "/sdcard/Android/data",
+        ];
+        for f in folders {
+            let size = crate::adb::du_remote(&adb, &serial, f).unwrap_or(0);
+            self.storage_usage.push((f.to_string(), size));
+        }
+        self.storage_usage.sort_by_key(|a| std::cmp::Reverse(a.1));
+        self.status = i18n::tr("storage.usage.loaded").to_string();
+    }
+
+    pub fn open_storage_volumes(&mut self) {
+        self.screen = Screen::StorageVolumes;
+        self.storage_volumes.clear();
+        let serial = self.serial.clone().unwrap_or_default();
+        if let Ok(text) = crate::adb::sm_list_volumes(&self.adb, &serial) {
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    self.storage_volumes.push(line.to_string());
+                }
+            }
+        }
+        self.status = i18n::tr("storage.volumes.loaded").to_string();
+    }
+
+    pub fn open_file_browser(&mut self) {
+        self.screen = Screen::FileBrowser;
+        self.file_browser_loading = true;
+        self.status = "↑↓ navegar  ← subir  → entrar  d descargar  c copiar  m mover  v pegar  x borrar  r refrescar  / filtrar  Esc salir".to_string();
+        self.file_browser_pending_delete = None;
+        self.file_browser_clipboard = None;
+        self.load_file_browser();
+    }
+
+    pub fn load_file_browser(&mut self) {
+        match crate::adb::list_remote(
+            &self.adb,
+            self.serial.as_deref().unwrap_or(""),
+            &self.file_browser_path,
+        ) {
+            Ok(entries) => {
+                self.file_browser_entries = entries;
+                self.file_browser_loading = false;
+                if self.file_browser_entries.is_empty() {
+                    self.file_browser_state.select(None);
+                    self.status = i18n::tr("files.empty").to_string();
+                } else {
+                    self.file_browser_state.select(Some(0));
+                    self.status = i18n::tr("files.loaded").to_string();
+                }
+            }
+            Err(e) => {
+                self.file_browser_loading = false;
+                self.status = rust_i18n::t!("app.error", error = e).to_string();
+            }
+        }
     }
 
     pub fn start_wifi_scan(&mut self) {
@@ -887,6 +1031,7 @@ impl App {
         self.wifi_scanning = true;
         self.wifi_discovered.clear();
         self.wifi_rejected.clear();
+        self.wifi_show_rejected = false;
         self.wifi_scan_results.clear();
         self.wifi_scan_progress = 0;
         self.wifi_scan_start = Some(Instant::now());
@@ -927,6 +1072,7 @@ impl App {
             self.wifi_scanning = false;
             self.wifi_scan_rx = None;
             self.wifi_scan_start = None;
+            self.wifi_scan_last_at = Some(Instant::now());
             self.wifi_discovered.sort();
             self.wifi_rejected.sort();
             if self.wifi_discovered.is_empty() && self.wifi_rejected.is_empty() {
@@ -1214,13 +1360,19 @@ impl App {
 
     fn auto_serial(&self) -> Option<String> {
         if let Some(serial) = &self.serial_override
-            && let Some(device) = self.devices.iter().find(|d| d.serial == *serial)
+            && let Some(device) = self
+                .devices
+                .iter()
+                .find(|d| d.serial == *serial && d.state == "device")
         {
             return Some(device.serial.clone());
         }
         if let Ok(env_serial) = std::env::var("ANDROID_SERIAL")
             && !env_serial.is_empty()
-            && let Some(device) = self.devices.iter().find(|d| d.serial == env_serial)
+            && let Some(device) = self
+                .devices
+                .iter()
+                .find(|d| d.serial == env_serial && d.state == "device")
         {
             return Some(device.serial.clone());
         }
@@ -1230,15 +1382,31 @@ impl App {
     pub fn load_devices(&mut self) {
         match crate::adb::devices(&self.adb) {
             Ok(devs) => {
-                let mut usable: Vec<Device> =
-                    devs.into_iter().filter(|d| d.state == "device").collect();
+                // Mostrar todos los estados (device/offline/unauthorized) para diagnóstico.
+                let mut usable: Vec<Device> = devs;
                 for d in &mut usable {
                     let (manufacturer, model) =
                         crate::adb::device_brand_model(&self.adb, &d.serial);
                     d.manufacturer = manufacturer;
                     d.model = model;
                 }
-                self.devices = usable;
+                // Deduplicar: si el mismo modelo está conectado por USB y Wi-Fi,
+                // dar prioridad al USB (ocultar la entrada Wi-Fi duplicada).
+                let usb_keys: std::collections::HashSet<(String, String)> = usable
+                    .iter()
+                    .filter(|d| !d.serial.contains(':'))
+                    .map(|d| (d.manufacturer.clone(), d.model.clone()))
+                    .collect();
+                let mut deduped: Vec<Device> = usable
+                    .into_iter()
+                    .filter(|d| {
+                        !(d.serial.contains(':')
+                            && usb_keys.contains(&(d.manufacturer.clone(), d.model.clone())))
+                    })
+                    .collect();
+                // USB primero, luego Wi-Fi.
+                deduped.sort_by_key(|d| d.serial.contains(':'));
+                self.devices = deduped;
                 if let Some(serial) = self.auto_serial() {
                     let index = self
                         .devices
@@ -1627,6 +1795,41 @@ impl App {
         }
     }
 
+    pub fn clear_cache_selected(&mut self) {
+        if let Some(serial) = self.serial.clone() {
+            let to_clear: Vec<String> = if self.selected.is_empty() {
+                // if nothing selected, use highlighted item? selected list may be empty; fallback to none
+                Vec::new()
+            } else {
+                self.selected.drain().collect()
+            };
+            if to_clear.is_empty() {
+                self.status = i18n::tr("apps.status.nothing_selected").to_string();
+                return;
+            }
+            let mut ok = 0;
+            let mut fail = 0;
+            for pkg in &to_clear {
+                let result = std::process::Command::new(&self.adb)
+                    .args(["-s", &serial, "shell", "pm", "clear", pkg])
+                    .output();
+                match result {
+                    Ok(out) => {
+                        let text = String::from_utf8_lossy(&out.stdout).to_string()
+                            + &String::from_utf8_lossy(&out.stderr);
+                        if text.to_lowercase().contains("success") {
+                            ok += 1;
+                        } else {
+                            fail += 1;
+                        }
+                    }
+                    Err(_) => fail += 1,
+                }
+            }
+            self.status = format!("Cache cleared: {} ok, {} fail", ok, fail);
+        }
+    }
+
     pub fn load_device_info(&mut self) {
         self.device_info_scroll = 0;
         let Some(serial) = self.serial.clone() else {
@@ -1985,6 +2188,7 @@ mod tests {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
+                "device.menu.storage",
                 "device.menu.back",
             ]
         );
