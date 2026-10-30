@@ -33,6 +33,34 @@ cargo build --release
 
 > The Rust project lives in the `adbcli/` directory. The commands above assume you are inside that directory.
 
+## Docker
+
+Stable image (amd64) published to GHCR:
+
+```bash
+docker pull ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+Wi-Fi ADB (recommended in container):
+
+```bash
+docker run --rm -it --network host ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+USB ADB (Linux host):
+
+```bash
+docker run --rm -it --privileged -v /dev/bus/usb:/dev/bus/usb ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+Persist config:
+
+```bash
+docker run --rm -it --network host -v alejandradb-config:/root/.config/alejandradb ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+> Note: USB access in Docker Desktop (Windows/macOS) is limited; prefer native binary for USB on those platforms.
+
 ## Usage
 
 Run without arguments to open the TUI. Pass a subcommand for CLI mode.
