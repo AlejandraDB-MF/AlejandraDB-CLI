@@ -399,6 +399,7 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         AppAction::Uninstall => i18n::tr("apps.action.uninstall"),
         AppAction::Reinstall => i18n::tr("apps.action.reinstall"),
         AppAction::Enable => i18n::tr("apps.action.enable"),
+        AppAction::ClearCache => i18n::tr("storage.cache.title"),
     };
     // Uninstall view shows all installed packages (system apps included, marked).
     let uninstall_all =

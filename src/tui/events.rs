@@ -506,11 +506,18 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
                     crate::tui::app::AppAction::Enable => {
                         app.enable_selected();
                     }
+                    crate::tui::app::AppAction::ClearCache => {
+                        app.clear_cache_selected();
+                    }
                 }
             }
         }
         KeyCode::Esc => {
-            app.screen = Screen::AppsMenu;
+            if app.app_action == crate::tui::app::AppAction::ClearCache {
+                app.screen = Screen::StorageMenu;
+            } else {
+                app.screen = Screen::AppsMenu;
+            }
         }
         _ => {}
     }
@@ -1181,9 +1188,16 @@ pub fn handle_storage_menu(app: &mut App, key: KeyEvent) {
             match i {
                 0 => app.open_file_browser(),
                 1 => {
-                    app.storage_cache_input.clear();
-                    app.storage_cache_input_mode = true;
-                    app.status = i18n::tr("storage.cache.prompt").to_string();
+                    if let Err(e) = app.ensure_safety() {
+                        app.status = rust_i18n::t!("app.error", error = e).to_string();
+                    }
+                    app.app_action = AppAction::ClearCache;
+                    app.app_view = AppView::Installed;
+                    if !app.list_cache_matches(AppAction::ClearCache, AppView::Installed) {
+                        app.load_packages(false);
+                    }
+                    app.status = i18n::tr("apps.status.help").to_string();
+                    app.screen = Screen::AppList;
                 }
                 2 => app.open_storage_usage(),
                 3 => app.open_storage_volumes(),

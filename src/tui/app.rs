@@ -22,6 +22,7 @@ pub enum AppAction {
     Uninstall,
     Reinstall,
     Enable,
+    ClearCache,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1766,6 +1767,41 @@ impl App {
             }
             self.status = rust_i18n::t!("apps.status.enabled", ok = ok, fail = fail).to_string();
             self.load_disabled_packages();
+        }
+    }
+
+    pub fn clear_cache_selected(&mut self) {
+        if let Some(serial) = self.serial.clone() {
+            let to_clear: Vec<String> = if self.selected.is_empty() {
+                // if nothing selected, use highlighted item? selected list may be empty; fallback to none
+                Vec::new()
+            } else {
+                self.selected.drain().collect()
+            };
+            if to_clear.is_empty() {
+                self.status = i18n::tr("apps.status.nothing_selected").to_string();
+                return;
+            }
+            let mut ok = 0;
+            let mut fail = 0;
+            for pkg in &to_clear {
+                let result = std::process::Command::new(&self.adb)
+                    .args(["-s", &serial, "shell", "pm", "clear", pkg])
+                    .output();
+                match result {
+                    Ok(out) => {
+                        let text = String::from_utf8_lossy(&out.stdout).to_string()
+                            + &String::from_utf8_lossy(&out.stderr);
+                        if text.to_lowercase().contains("success") {
+                            ok += 1;
+                        } else {
+                            fail += 1;
+                        }
+                    }
+                    Err(_) => fail += 1,
+                }
+            }
+            self.status = format!("Cache cleared: {} ok, {} fail", ok, fail);
         }
     }
 
