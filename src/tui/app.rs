@@ -979,7 +979,7 @@ impl App {
     pub fn open_file_browser(&mut self) {
         self.screen = Screen::FileBrowser;
         self.file_browser_loading = true;
-        self.status = i18n::tr("files.loading").to_string();
+        self.status = "↑↓ navegar  ← subir  → entrar  d descargar  x borrar  r refrescar  / filtrar  Esc salir".to_string();
         self.load_file_browser();
     }
 

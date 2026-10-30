@@ -1059,6 +1059,42 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
                 App::move_list(&mut app.file_browser_state, len, 1);
             }
         }
+        KeyCode::Left => {
+            // subir nivel
+            let p = app.file_browser_path.trim_end_matches('/');
+            if let Some(pos) = p.rfind('/') {
+                if pos == 0 {
+                    app.file_browser_path = "/".to_string();
+                } else {
+                    app.file_browser_path = p[..pos].to_string();
+                }
+                if app.file_browser_path.is_empty() {
+                    app.file_browser_path = "/".to_string();
+                }
+                app.load_file_browser();
+            } else {
+                app.screen = Screen::DeviceMenu;
+            }
+        }
+        KeyCode::Right => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            if entry.is_dir {
+                let new_path = if app.file_browser_path.ends_with('/') {
+                    format!("{}{}", app.file_browser_path, entry.name)
+                } else {
+                    format!("{}/{}", app.file_browser_path, entry.name)
+                };
+                app.file_browser_path = new_path;
+                app.load_file_browser();
+            }
+        }
         KeyCode::Enter => {
             let Some(sel) = app.file_browser_state.selected() else {
                 return;
