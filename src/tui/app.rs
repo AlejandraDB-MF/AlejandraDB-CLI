@@ -61,6 +61,7 @@ pub enum Screen {
     Network,
     WifiDiscover,
     WifiConnect,
+    FileBrowser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +191,15 @@ pub struct App {
     pub wifi_subnet_input: String,
     pub wifi_subnet_input_mode: bool,
     pub wifi_scan_start: Option<Instant>,
-    pub wifi_scan_last_at: Option<Instant>,    pub wifi_scan_progress: usize,
+    pub wifi_scan_last_at: Option<Instant>,
+    pub file_browser_path: String,
+    pub file_browser_entries: Vec<crate::adb::RemoteEntry>,
+    pub file_browser_state: ListState,
+    pub file_browser_loading: bool,
+    pub file_browser_filter: String,
+    pub file_browser_input_mode: bool,
+    pub file_browser_input: String,
+    pub file_browser_pending_delete: Option<String>,    pub wifi_scan_progress: usize,
 }
 
 impl App {
@@ -257,6 +266,7 @@ impl App {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
+                "device.menu.files",
                 "device.menu.back",
             ],
             device_menu_state,
@@ -342,6 +352,18 @@ impl App {
             wifi_subnet_input_mode: false,
             wifi_scan_start: None,
             wifi_scan_last_at: None,
+            file_browser_path: "/sdcard".to_string(),
+            file_browser_entries: Vec::new(),
+            file_browser_state: {
+                let mut s = ListState::default();
+                s.select(Some(0));
+                s
+            },
+            file_browser_loading: false,
+            file_browser_filter: String::new(),
+            file_browser_input_mode: false,
+            file_browser_input: String::new(),
+            file_browser_pending_delete: None,
             wifi_scan_progress: 0,
         };
         app.refresh_network_menu();
@@ -892,6 +914,33 @@ impl App {
             }
             if let Some(at) = self.wifi_scan_last_at {
                 self.status = format!("Last scan: {}", at.elapsed().as_secs());
+            }
+        }
+    }
+
+    pub fn open_file_browser(&mut self) {
+        self.screen = Screen::FileBrowser;
+        self.file_browser_loading = true;
+        self.status = i18n::tr("files.loading").to_string();
+        self.load_file_browser();
+    }
+
+    pub fn load_file_browser(&mut self) {
+        match crate::adb::list_remote(&self.adb, self.serial.as_deref().unwrap_or(""), &self.file_browser_path) {
+            Ok(entries) => {
+                self.file_browser_entries = entries;
+                self.file_browser_loading = false;
+                if self.file_browser_entries.is_empty() {
+                    self.file_browser_state.select(None);
+                    self.status = i18n::tr("files.empty").to_string();
+                } else {
+                    self.file_browser_state.select(Some(0));
+                    self.status = i18n::tr("files.loaded").to_string();
+                }
+            }
+            Err(e) => {
+                self.file_browser_loading = false;
+                self.status = rust_i18n::t!("app.error", error = e).to_string();
             }
         }
     }
@@ -2017,6 +2066,7 @@ mod tests {
                 "device.menu.shell",
                 "device.menu.control",
                 "device.menu.network",
+                "device.menu.files",
                 "device.menu.back",
             ]
         );

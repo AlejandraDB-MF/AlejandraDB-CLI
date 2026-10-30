@@ -47,6 +47,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Screen::Network => handle_network(app, key),
         Screen::WifiDiscover => handle_wifi_discover(app, key),
         Screen::WifiConnect => handle_wifi_connect(app, key),
+    Screen::FileBrowser => handle_file_browser(app, key),
     }
 }
 
@@ -175,7 +176,10 @@ pub fn handle_device_menu(app: &mut App, key: KeyEvent) {
                 7 => {
                     app.open_network();
                 }
-                8 => app.screen = Screen::MainMenu,
+                8 => {
+                    app.open_file_browser();
+                }
+                9 => app.screen = Screen::MainMenu,
                 _ => {}
             }
         }
@@ -973,6 +977,155 @@ pub fn handle_output_path(app: &mut App, key: KeyEvent) {
     }
 }
 
+pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
+    if app.file_browser_input_mode {
+        match key.code {
+            KeyCode::Char(c) => app.file_browser_input.push(c),
+            KeyCode::Backspace => {
+                app.file_browser_input.pop();
+            }
+            KeyCode::Enter => {
+                app.file_browser_input_mode = false;
+            }
+            KeyCode::Esc => {
+                app.file_browser_input.clear();
+                app.file_browser_input_mode = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+    if app.file_browser_pending_delete.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if let Some(path) = app.file_browser_pending_delete.take() {
+                    if crate::adb::validate_remote_path(&path) {
+                        let _ = crate::adb::remove_remote(&app.adb, app.serial.as_deref().unwrap_or(""), &path);
+                    }
+                    app.load_file_browser();
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.file_browser_pending_delete = None;
+                app.status = i18n::tr("files.hint").to_string();
+            }
+            _ => {}
+        }
+        return;
+    }
+    let filtered: Vec<usize> = app
+        .file_browser_entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            app.file_browser_filter.is_empty()
+                || e.name
+                    .to_lowercase()
+                    .contains(&app.file_browser_filter.to_lowercase())
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let len = filtered.len();
+    match key.code {
+        KeyCode::Up => {
+            if len > 0 {
+                App::move_list(&mut app.file_browser_state, len, -1);
+            }
+        }
+        KeyCode::Down => {
+            if len > 0 {
+                App::move_list(&mut app.file_browser_state, len, 1);
+            }
+        }
+        KeyCode::Enter => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            if entry.is_dir {
+                let new_path = if app.file_browser_path.ends_with('/') {
+                    format!("{}{}", app.file_browser_path, entry.name)
+                } else {
+                    format!("{}/{}", app.file_browser_path, entry.name)
+                };
+                app.file_browser_path = new_path;
+                app.load_file_browser();
+            }
+        }
+        KeyCode::Backspace => {
+            let p = app.file_browser_path.trim_end_matches('/');
+            if let Some(pos) = p.rfind('/') {
+                if pos == 0 {
+                    app.file_browser_path = "/".to_string();
+                } else {
+                    app.file_browser_path = p[..pos].to_string();
+                }
+                if app.file_browser_path.is_empty() {
+                    app.file_browser_path = "/".to_string();
+                }
+                app.load_file_browser();
+            } else {
+                app.screen = Screen::DeviceMenu;
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            if entry.is_dir {
+                return;
+            }
+            let remote = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            let local = format!("{}/{}", std::env::var("HOME").unwrap_or_default(), entry.name);
+            match crate::adb::pull_remote(&app.adb, app.serial.as_deref().unwrap_or(""), &remote, &local) {
+                Ok(_) => app.status = i18n::tr("files.pull_done").to_string(),
+                Err(e) => app.status = rust_i18n::t!("app.error", error = e).to_string(),
+            }
+        }
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            let Some(sel) = app.file_browser_state.selected() else {
+                return;
+            };
+            if sel >= filtered.len() {
+                return;
+            }
+            let idx = filtered[sel];
+            let entry = &app.file_browser_entries[idx];
+            let path = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), entry.name);
+            if crate::adb::validate_remote_path(&path) {
+                app.file_browser_pending_delete = Some(path);
+                app.status = i18n::tr("files.delete_confirm").to_string();
+            } else {
+                app.status = i18n::tr("files.protected").to_string();
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.load_file_browser();
+        }
+        KeyCode::Char('/') => {
+            app.file_browser_input_mode = true;
+            app.file_browser_input.clear();
+            app.file_browser_filter.clear();
+        }
+        KeyCode::Esc => {
+            app.screen = Screen::DeviceMenu;
+        }
+        _ => {}
+    }
+    if app.file_browser_input_mode {
+        app.file_browser_filter = app.file_browser_input.clone();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1029,7 +1182,7 @@ mod tests {
         let mut app = App::new("adb".to_string(), None, Lang::English);
         app.serial = Some("serial".to_string());
         app.screen = Screen::DeviceMenu;
-        app.device_menu_state.select(Some(8));
+        app.device_menu_state.select(Some(9));
         handle_key(&mut app, press(KeyCode::Enter));
         assert_eq!(app.screen, Screen::MainMenu);
     }

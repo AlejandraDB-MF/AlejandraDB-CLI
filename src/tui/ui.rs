@@ -43,6 +43,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Screen::Network => render_network(f, app, chunks[0]),
         Screen::WifiDiscover => render_wifi_discover(f, app, chunks[0]),
         Screen::WifiConnect => render_wifi_connect(f, app, chunks[0]),
+        Screen::FileBrowser => render_file_browser(f, app, chunks[0]),
     }
 
     if !app.status.is_empty() {
@@ -758,4 +759,39 @@ fn render_wifi_connect(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
         .block(block)
         .wrap(Wrap { trim: false });
     f.render_widget(para, area);
+}
+
+fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = format!("Files: {}", app.file_browser_path);
+    if app.file_browser_loading {
+        let para = Paragraph::new(i18n::tr("files.loading")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    if app.file_browser_entries.is_empty() {
+        let para = Paragraph::new(i18n::tr("files.empty")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    let filter = app.file_browser_filter.to_lowercase();
+    let mut items: Vec<ListItem> = Vec::new();
+    for e in &app.file_browser_entries {
+        if !filter.is_empty() && !e.name.to_lowercase().contains(&filter) {
+            continue;
+        }
+        let icon = if e.is_dir { "📁" } else { "📄" };
+        let size = if e.is_dir {
+            String::new()
+        } else {
+            format!("  {} B", e.size)
+        };
+        items.push(ListItem::new(format!("{} {}{}", icon, e.name, size)));
+    }
+    let mut state = app.file_browser_state;
+    let list = List::new(items)
+        .block(menu_block(title))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.file_browser_state = state;
 }
