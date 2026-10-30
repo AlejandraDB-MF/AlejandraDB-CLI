@@ -8,7 +8,23 @@ Terminal tool for managing Android devices through ADB. Lists devices, manages a
 - `adb` binary on PATH, or set `ADB_PATH`
 - On Fedora: `sudo dnf install android-tools`
 
-## Install
+## Install (prebuilt)
+
+Linux (x86_64/aarch64, static musl):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main/install.sh | sh
+```
+
+Windows: download `alejandradb.exe` from the [latest release](https://github.com/AlejandraDB-MF/AlejandraDB-CLI/releases/latest) and place it in your PATH.
+
+Nightly/dev builds (from `develop`) are published as prereleases tagged `nightly-<sha>`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AlejandraDB-MF/AlejandraDB-CLI/main/install.sh | sh -s -- nightly-<sha>
+```
+
+## Install (from source)
 
 ```bash
 cargo build --release
@@ -16,6 +32,34 @@ cargo build --release
 ```
 
 > The Rust project lives in the `adbcli/` directory. The commands above assume you are inside that directory.
+
+## Docker
+
+Stable image (amd64) published to GHCR:
+
+```bash
+docker pull ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+Wi-Fi ADB (recommended in container):
+
+```bash
+docker run --rm -it --network host ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+USB ADB (Linux host):
+
+```bash
+docker run --rm -it --privileged -v /dev/bus/usb:/dev/bus/usb ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+Persist config:
+
+```bash
+docker run --rm -it --network host -v alejandradb-config:/root/.config/alejandradb ghcr.io/alejandradb-mf/alejandradb:latest
+```
+
+> Note: USB access in Docker Desktop (Windows/macOS) is limited; prefer native binary for USB on those platforms.
 
 ## Usage
 

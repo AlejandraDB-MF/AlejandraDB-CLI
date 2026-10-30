@@ -1,0 +1,10 @@
+target/
+.git/
+llm_files/
+*.md
+Dockerfile
+.dockerignore
+.github/
+install.sh
+justfile
+Cargo.lock
