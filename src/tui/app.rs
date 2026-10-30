@@ -187,6 +187,7 @@ pub struct App {
     pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,
     pub wifi_scan_results: Vec<String>,
     pub wifi_rejected: Vec<String>,
+    pub wifi_show_rejected: bool,
     pub wifi_subnet_input: String,
     pub wifi_subnet_input_mode: bool,
     pub wifi_scan_start: Option<Instant>,
@@ -337,6 +338,7 @@ impl App {
             wifi_scan_rx: None,
             wifi_scan_results: Vec::new(),
             wifi_rejected: Vec::new(),
+            wifi_show_rejected: false,
             wifi_subnet_input: String::new(),
             wifi_subnet_input_mode: false,
             wifi_scan_start: None,
@@ -874,6 +876,7 @@ impl App {
         self.wifi_discover_state.select(Some(0));
         self.wifi_discovered.clear();
         self.wifi_rejected.clear();
+        self.wifi_show_rejected = false;
         self.wifi_scan_results.clear();
         self.wifi_scan_progress = 0;
         self.wifi_scan_start = Some(Instant::now());
@@ -887,6 +890,7 @@ impl App {
         self.wifi_scanning = true;
         self.wifi_discovered.clear();
         self.wifi_rejected.clear();
+        self.wifi_show_rejected = false;
         self.wifi_scan_results.clear();
         self.wifi_scan_progress = 0;
         self.wifi_scan_start = Some(Instant::now());

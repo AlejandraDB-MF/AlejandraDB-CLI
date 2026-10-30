@@ -696,8 +696,16 @@ fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
     for e in &app.wifi_discovered {
         items.push(ListItem::new(format!("✓ {}", e)).style(Style::default().fg(Color::Green)));
     }
-    for e in &app.wifi_rejected {
-        items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
+    if app.wifi_show_rejected {
+        for e in &app.wifi_rejected {
+            items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
+        }
+    } else if !app.wifi_rejected.is_empty() {
+        items.push(ListItem::new(format!(
+            "… {} rejected (press 'a' to show)",
+            app.wifi_rejected.len()
+        ))
+        .style(Style::default().fg(Color::DarkGray)));
     }
 
     let mut state = app.wifi_discover_state;

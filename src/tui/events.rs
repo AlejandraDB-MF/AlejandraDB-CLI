@@ -747,13 +747,35 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    let len = app.wifi_discovered.len();
+    let len = if app.wifi_show_rejected {
+        app.wifi_discovered.len() + app.wifi_rejected.len()
+    } else {
+        app.wifi_discovered.len()
+    };
     match key.code {
         KeyCode::Up => {
-            App::move_list(&mut app.wifi_discover_state, len, -1);
+            if len > 0 {
+                App::move_list(&mut app.wifi_discover_state, len, -1);
+            }
         }
         KeyCode::Down => {
-            App::move_list(&mut app.wifi_discover_state, len, 1);
+            if len > 0 {
+                App::move_list(&mut app.wifi_discover_state, len, 1);
+            }
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            app.wifi_show_rejected = !app.wifi_show_rejected;
+            let new_len = if app.wifi_show_rejected {
+                app.wifi_discovered.len() + app.wifi_rejected.len()
+            } else {
+                app.wifi_discovered.len()
+            };
+            if new_len == 0 {
+                app.wifi_discover_state.select(None);
+            } else {
+                let sel = app.wifi_discover_state.selected().unwrap_or(0).min(new_len - 1);
+                app.wifi_discover_state.select(Some(sel));
+            }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             app.start_wifi_scan();
