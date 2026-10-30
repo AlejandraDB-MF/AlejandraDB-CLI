@@ -184,8 +184,7 @@ pub struct App {
     pub wifi_connect_input_mode: bool,
     pub wifi_connect_result: Option<ApkResult>,
     pub wifi_scanning: bool,
-    pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,
-    pub wifi_scan_results: Vec<String>,
+    pub wifi_scan_rx: Option<Receiver<crate::adb::WifiScanEntry>>,    pub wifi_scan_results: Vec<String>,
     pub wifi_rejected: Vec<String>,
     pub wifi_show_rejected: bool,
     pub wifi_subnet_input: String,
@@ -1233,14 +1232,12 @@ impl App {
 
     fn auto_serial(&self) -> Option<String> {
         if let Some(serial) = &self.serial_override
-            && let Some(device) = self.devices.iter().find(|d| d.serial == *serial)
-        {
+            && let Some(device) = self.devices.iter().find(|d| d.serial == *serial && d.state == "device")        {
             return Some(device.serial.clone());
         }
         if let Ok(env_serial) = std::env::var("ANDROID_SERIAL")
             && !env_serial.is_empty()
-            && let Some(device) = self.devices.iter().find(|d| d.serial == env_serial)
-        {
+            && let Some(device) = self.devices.iter().find(|d| d.serial == env_serial && d.state == "device")        {
             return Some(device.serial.clone());
         }
         None
@@ -1249,8 +1246,8 @@ impl App {
     pub fn load_devices(&mut self) {
         match crate::adb::devices(&self.adb) {
             Ok(devs) => {
-                let mut usable: Vec<Device> =
-                    devs.into_iter().filter(|d| d.state == "device").collect();
+                // Mostrar todos los estados (device/offline/unauthorized) para diagnóstico.
+                let mut usable: Vec<Device> = devs;
                 for d in &mut usable {
                     let (manufacturer, model) =
                         crate::adb::device_brand_model(&self.adb, &d.serial);

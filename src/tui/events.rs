@@ -75,7 +75,16 @@ pub fn handle_device_select(app: &mut App, key: KeyEvent) {
                     app.status = i18n::tr("device.select.loading");
                     return;
                 }
-                let serial = app.devices[selected].serial.clone();
+                let device = &app.devices[selected];
+                if device.state != "device" {
+                    app.status = format!(
+                        "{} ({})",
+                        i18n::tr("app.status.no_device"),
+                        device.state
+                    );
+                    return;
+                }
+                let serial = device.serial.clone();
                 app.select_device(serial);
             } else if selected == app.devices.len() {
                 app.open_wifi_discover();
@@ -796,13 +805,32 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
                 Ok(_) => {
                     app.loading = true;
                     app.status = i18n::tr("device.select.loading");
-                    app.load_devices();
-                    if app.devices.iter().any(|d| d.serial == endpoint) {
-                        app.select_device(endpoint);
+                    // Reintentar para que adb devices registre el endpoint.
+                    for _ in 0..3 {
+                        app.load_devices();
+                        if app.devices.iter().any(|d| d.serial == endpoint) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                    if let Some(dev) = app.devices.iter().find(|d| d.serial == endpoint) {
+                        let state = dev.state.clone();
+                        if state == "device" {
+                            app.select_device(endpoint);
+                        } else {
+                            if app.serial.is_none() {
+                                app.open_device_select();
+                            }
+                            app.status = format!(
+                                "{} ({})",
+                                i18n::tr("wifi.status.connected"),
+                                state
+                            );
+                        }
                     } else if app.serial.is_none() {
                         app.open_device_select();
                         app.status = format!(
-                            "{} (refresh if not listed)",
+                            "{} (adb devices no lo lista aún; usa 'r' para refrescar)",
                             i18n::tr("wifi.status.connected")
                         );
                     } else {
@@ -857,12 +885,40 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                     Ok(_) => {
                         app.loading = true;
                         app.status = i18n::tr("device.select.loading");
-                        app.load_devices();
+                        for _ in 0..3 {
+                            app.load_devices();
+                            if app.devices.iter().any(|d| d.serial == endpoint) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
                         app.loading = false;
-                        if app.devices.iter().any(|d| d.serial == endpoint) {
-                            app.select_device(endpoint.clone());
+                        if let Some(dev) = app.devices.iter().find(|d| d.serial == endpoint) {
+                            let state = dev.state.clone();
+                            if state == "device" {
+                                app.select_device(endpoint.clone());
+                            } else if app.serial.is_none() {
+                                app.open_device_select();
+                                app.status = format!(
+                                    "{} ({})",
+                                    i18n::tr("wifi.status.connected"),
+                                    state
+                                );
+                            } else {
+                                app.status = format!(
+                                    "{} ({})",
+                                    i18n::tr("wifi.status.connected"),
+                                    state
+                                );
+                            }
                         } else if app.serial.is_none() {
                             app.open_device_select();
+                            app.status = format!(
+                                "{} (adb devices no lo lista aún; usa 'r' para refrescar)",
+                                i18n::tr("wifi.status.connected")
+                            );
+                        } else {
+                            app.status = i18n::tr("wifi.status.connected");
                         }
                         app.wifi_connect_result = Some(ApkResult {
                             text: i18n::tr("wifi.status.connected"),
