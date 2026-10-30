@@ -972,7 +972,7 @@ impl App {
             let size = crate::adb::du_remote(&adb, &serial, f).unwrap_or(0);
             self.storage_usage.push((f.to_string(), size));
         }
-        self.storage_usage.sort_by(|a, b| b.1.cmp(&a.1));
+        self.storage_usage.sort_by_key(|a| std::cmp::Reverse(a.1));
         self.status = i18n::tr("storage.usage.loaded").to_string();
     }
 

@@ -665,10 +665,10 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
 fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let mut title = i18n::tr("wifi.discover.title").to_string();
-    if !app.wifi_scanning {
-        if let Some(at) = app.wifi_scan_last_at {
-            title = format!("{} (last scan {}s ago)", title, at.elapsed().as_secs());
-        }
+    if !app.wifi_scanning
+        && let Some(at) = app.wifi_scan_last_at
+    {
+        title = format!("{} (last scan {}s ago)", title, at.elapsed().as_secs());
     }
     if app.wifi_scanning {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

@@ -1014,15 +1014,16 @@ pub fn parse_remote_ls(text: &str) -> Vec<RemoteEntry> {
         }
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 6 {
-            if let Some(name) = parts.last() {
-                if *name != "." && *name != ".." {
-                    result.push(RemoteEntry {
-                        name: name.to_string(),
-                        is_dir: false,
-                        size: 0,
-                        modified: String::new(),
-                    });
-                }
+            if let Some(name) = parts.last()
+                && *name != "."
+                && *name != ".."
+            {
+                result.push(RemoteEntry {
+                    name: name.to_string(),
+                    is_dir: false,
+                    size: 0,
+                    modified: String::new(),
+                });
             }
             continue;
         }
