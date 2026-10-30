@@ -79,14 +79,14 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         .devices
         .iter()
         .map(|d| {
-            let wifi = if d.serial.contains(':') {
+            let conn = if d.serial.contains(':') {
                 " (Wi-Fi)"
             } else {
-                ""
+                " (USB)"
             };
             ListItem::new(format!(
                 "{} {} ({}) [{}]{}",
-                d.manufacturer, d.model, d.serial, d.state, wifi
+                d.manufacturer, d.model, d.serial, d.state, conn
             ))
         })
         .collect();

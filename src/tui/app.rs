@@ -1254,7 +1254,23 @@ impl App {
                     d.manufacturer = manufacturer;
                     d.model = model;
                 }
-                self.devices = usable;
+                // Deduplicar: si el mismo modelo está conectado por USB y Wi-Fi,
+                // dar prioridad al USB (ocultar la entrada Wi-Fi duplicada).
+                let usb_keys: std::collections::HashSet<(String, String)> = usable
+                    .iter()
+                    .filter(|d| !d.serial.contains(':'))
+                    .map(|d| (d.manufacturer.clone(), d.model.clone()))
+                    .collect();
+                let mut deduped: Vec<Device> = usable
+                    .into_iter()
+                    .filter(|d| {
+                        !(d.serial.contains(':')
+                            && usb_keys.contains(&(d.manufacturer.clone(), d.model.clone())))
+                    })
+                    .collect();
+                // USB primero, luego Wi-Fi.
+                deduped.sort_by_key(|d| d.serial.contains(':'));
+                self.devices = deduped;
                 if let Some(serial) = self.auto_serial() {
                     let index = self
                         .devices
