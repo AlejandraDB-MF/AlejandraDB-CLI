@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+    outputs:
+      short-sha: ${{ steps.sha.outputs.short }}
+      date: ${{ steps.sha.outputs.date }}
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +112,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         with:
-          tag_name: nightly-${{ steps.sha.outputs.date }}-${{ steps.sha.outputs.short }}
-          name: "Nightly ${{ steps.sha.outputs.date }} (${{ steps.sha.outputs.short }})"
+          tag_name: nightly-${{ needs.build.outputs.date }}-${{ needs.build.outputs.short-sha }}
+          name: "Nightly ${{ needs.build.outputs.date }} (${{ needs.build.outputs.short-sha }})"
           prerelease: true
           files: dist/*
