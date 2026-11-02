@@ -127,21 +127,25 @@ pub fn uninstall(
 
 pub fn available_system(adb: &str, serial: &str) -> Result<Vec<String>> {
     crate::validate::serial(serial)?;
-    // `pm list packages -u` includes uninstalled (system) packages marked with a trailing indicator.
+    // Run both queries in a single adb invocation to reduce round-trips.
     let out = Command::new(adb)
-        .args(["-s", serial, "shell", "pm", "list", "packages", "-u"])
+        .args([
+            "-s",
+            serial,
+            "shell",
+            "sh",
+            "-c",
+            "pm list packages -u; echo '---ADBCLI---'; pm list packages",
+        ])
         .output()
         .with_context(|| rust_i18n::t!("package.error.available").to_string())?;
     let text = String::from_utf8_lossy(&out.stdout);
-    let all = parse_list(&text);
-
-    // installed set
-    let out2 = Command::new(adb)
-        .args(["-s", serial, "shell", "pm", "list", "packages"])
-        .output()
-        .with_context(|| rust_i18n::t!("package.error.list").to_string())?;
-    let text2 = String::from_utf8_lossy(&out2.stdout);
-    let installed: std::collections::HashSet<String> = parse_list(&text2).into_iter().collect();
+    let mut parts = text.split("---ADBCLI---");
+    let all_text = parts.next().unwrap_or("");
+    let installed_text = parts.next().unwrap_or("");
+    let all = parse_list(all_text);
+    let installed: std::collections::HashSet<String> =
+        parse_list(installed_text).into_iter().collect();
 
     let mut avail: Vec<String> = all.into_iter().filter(|p| !installed.contains(p)).collect();
     avail.sort();
@@ -158,7 +162,9 @@ pub fn install_existing(adb: &str, serial: &str, pkg: &str) -> Result<String> {
         .with_context(|| rust_i18n::t!("package.error.install_existing_cmd").to_string())?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stdout.to_lowercase().contains("success") || out.status.success() {
+    let combined_existing = format!("{stdout}{stderr}").to_lowercase();
+    let existing_failed = combined_existing.contains("fail") || combined_existing.contains("error");
+    if (combined_existing.contains("success") || out.status.success()) && !existing_failed {
         return Ok(rust_i18n::t!("package.result.installed").to_string());
     }
     // fallback
@@ -174,7 +180,10 @@ pub fn install_existing(adb: &str, serial: &str, pkg: &str) -> Result<String> {
         ])
         .output()?;
     let s2 = String::from_utf8_lossy(&out2.stdout);
-    if s2.to_lowercase().contains("success") || out2.status.success() {
+    let combined_existing2 = s2.to_lowercase();
+    let existing_failed2 =
+        combined_existing2.contains("fail") || combined_existing2.contains("error");
+    if (combined_existing2.contains("success") || out2.status.success()) && !existing_failed2 {
         return Ok(rust_i18n::t!("package.result.installed").to_string());
     }
     bail!(
@@ -195,13 +204,95 @@ pub fn install_apk(adb: &str, serial: &str, path: &str) -> Result<String> {
         .with_context(|| rust_i18n::t!("package.error.install_cmd").to_string())?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stdout.to_lowercase().contains("success") || out.status.success() {
+    let combined_install = format!("{stdout}{stderr}").to_lowercase();
+    let install_failed = combined_install.contains("fail") || combined_install.contains("error");
+    if (combined_install.contains("success") || out.status.success()) && !install_failed {
         return Ok(rust_i18n::t!("package.result.installed").to_string());
     }
     bail!(
         "{}",
         rust_i18n::t!(
             "package.error.install",
+            stdout = stdout.trim(),
+            stderr = stderr.trim()
+        )
+    )
+}
+
+pub fn force_stop(adb: &str, serial: &str, pkg: &str) -> Result<String> {
+    crate::validate::serial(serial)?;
+    crate::validate::package(pkg)?;
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "am", "force-stop", pkg])
+        .output()
+        .with_context(|| rust_i18n::t!("package.error.force_stop_cmd").to_string())?;
+    if out.status.success() {
+        return Ok(rust_i18n::t!("package.result.force_stopped").to_string());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    bail!(
+        "{}",
+        rust_i18n::t!(
+            "package.error.force_stop",
+            stdout = stdout.trim(),
+            stderr = stderr.trim()
+        )
+    )
+}
+
+pub fn clear_cache(adb: &str, serial: &str, pkg: &str) -> Result<String> {
+    crate::validate::serial(serial)?;
+    crate::validate::package(pkg)?;
+    // Prefer a real cache-only clean when the app is debuggable.
+    let out = Command::new(adb)
+        .args([
+            "-s",
+            serial,
+            "shell",
+            "run-as",
+            pkg,
+            "rm",
+            "-rf",
+            "cache",
+            "code_cache",
+        ])
+        .output();
+    if let Ok(out) = out {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let combined = format!("{stdout}{stderr}").to_lowercase();
+        if out.status.success()
+            && !combined.contains("not debuggable")
+            && !combined.contains("fail")
+            && !combined.contains("error")
+        {
+            return Ok(rust_i18n::t!("package.result.cleared_cache").to_string());
+        }
+    }
+    // Fallback: clear all app data (standard ADB behaviour).
+    clear_data(adb, serial, pkg)
+}
+
+pub fn clear_data(adb: &str, serial: &str, pkg: &str) -> Result<String> {
+    crate::validate::serial(serial)?;
+    crate::validate::package(pkg)?;
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "pm", "clear", pkg])
+        .output()
+        .with_context(|| rust_i18n::t!("package.error.clear_data_cmd").to_string())?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let combined = format!("{stdout}{stderr}");
+    let lower = combined.to_lowercase();
+    let failed = lower.contains("fail") || lower.contains("error");
+    if (lower.contains("success") || out.status.success()) && !failed {
+        return Ok(rust_i18n::t!("package.result.cleared_data").to_string());
+    }
+    bail!(
+        "{}",
+        rust_i18n::t!(
+            "package.error.clear_data",
             stdout = stdout.trim(),
             stderr = stderr.trim()
         )
@@ -217,7 +308,9 @@ pub fn enable(adb: &str, serial: &str, pkg: &str) -> Result<String> {
         .with_context(|| rust_i18n::t!("package.error.enable_cmd").to_string())?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stdout.to_lowercase().contains("enabled") || out.status.success() {
+    let combined_enable = format!("{stdout}{stderr}").to_lowercase();
+    let enable_failed = combined_enable.contains("fail") || combined_enable.contains("error");
+    if (combined_enable.contains("enabled") || out.status.success()) && !enable_failed {
         return Ok(rust_i18n::t!("package.result.enabled").to_string());
     }
     // fallback user-scoped
@@ -234,7 +327,9 @@ pub fn enable(adb: &str, serial: &str, pkg: &str) -> Result<String> {
         ])
         .output()?;
     let s2 = String::from_utf8_lossy(&out2.stdout);
-    if s2.to_lowercase().contains("enabled") || out2.status.success() {
+    let combined_enable2 = s2.to_lowercase();
+    let enable_failed2 = combined_enable2.contains("fail") || combined_enable2.contains("error");
+    if (combined_enable2.contains("enabled") || out2.status.success()) && !enable_failed2 {
         return Ok(rust_i18n::t!("package.result.enabled").to_string());
     }
     bail!(

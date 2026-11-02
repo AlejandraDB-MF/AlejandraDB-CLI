@@ -130,6 +130,24 @@ fn run() -> Result<()> {
                     }
                     Ok(())
                 }
+                cli::AppsAction::ForceStop { packages } => {
+                    let dev = device::select(&adb, cli.serial.as_deref())?;
+                    for pkg in packages {
+                        validate::package(&pkg)?;
+                        let res = package::force_stop(&adb, &dev.serial, &pkg)?;
+                        println!("{pkg}: {res}");
+                    }
+                    Ok(())
+                }
+                cli::AppsAction::ClearData { packages } => {
+                    let dev = device::select(&adb, cli.serial.as_deref())?;
+                    for pkg in packages {
+                        validate::package(&pkg)?;
+                        let res = package::clear_data(&adb, &dev.serial, &pkg)?;
+                        println!("{pkg}: {res}");
+                    }
+                    Ok(())
+                }
                 cli::AppsAction::Interactive => {
                     tui::run(&adb, cli.serial.as_deref(), config.language)
                 }

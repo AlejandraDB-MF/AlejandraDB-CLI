@@ -12,6 +12,7 @@ pub enum LogcatEvent {
     Error(String),
 }
 
+#[derive(Debug)]
 pub struct LogcatSession {
     child: Child,
     rx: Receiver<LogcatEvent>,

@@ -1,18 +1,27 @@
 use anyhow::{Result, bail};
 use regex::Regex;
 use std::path::Path;
+use std::sync::OnceLock;
+
+fn serial_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9._:\-]+$").unwrap())
+}
+
+fn package_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9._-]+$").unwrap())
+}
 
 pub fn serial(s: &str) -> Result<()> {
-    let re = Regex::new(r"^[A-Za-z0-9._:\-]+$").unwrap();
-    if !re.is_match(s) {
+    if !serial_regex().is_match(s) {
         bail!("{}", rust_i18n::t!("validate.error.serial", serial = s));
     }
     Ok(())
 }
 
 pub fn package(s: &str) -> Result<()> {
-    let re = Regex::new(r"^[A-Za-z0-9._-]+$").unwrap();
-    if !re.is_match(s) {
+    if !package_regex().is_match(s) {
         bail!("{}", rust_i18n::t!("validate.error.package", package = s));
     }
     Ok(())
