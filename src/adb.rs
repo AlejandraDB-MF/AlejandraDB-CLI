@@ -1035,9 +1035,7 @@ pub fn wifi_scan_network(
                     break;
                 }
                 let endpoint = format!("{subnet}.{i}:5555");
-                if let Ok(Some(connected)) =
-                    adb_connect_with_timeout(&adb, &endpoint, timeout_ms)
-                {
+                if let Ok(Some(connected)) = adb_connect_with_timeout(&adb, &endpoint, timeout_ms) {
                     let entry = WifiScanEntry {
                         endpoint,
                         rejected: !connected,
@@ -1297,7 +1295,10 @@ mod classify_connect_output_tests {
 
     #[test]
     fn connected() {
-        assert_eq!(classify_connect_output("connected to 192.168.1.85:5555"), Some(true));
+        assert_eq!(
+            classify_connect_output("connected to 192.168.1.85:5555"),
+            Some(true)
+        );
     }
 
     #[test]
@@ -1311,7 +1312,9 @@ mod classify_connect_output_tests {
     #[test]
     fn timeout_is_none() {
         assert_eq!(
-            classify_connect_output("failed to connect to '192.168.1.5:5555': Connection timed out"),
+            classify_connect_output(
+                "failed to connect to '192.168.1.5:5555': Connection timed out"
+            ),
             None
         );
     }
