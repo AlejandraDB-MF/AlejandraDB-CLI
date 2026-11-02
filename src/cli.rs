@@ -72,6 +72,14 @@ pub enum AppsAction {
         #[arg(required = true)]
         packages: Vec<String>,
     },
+    ForceStop {
+        #[arg(required = true)]
+        packages: Vec<String>,
+    },
+    ClearData {
+        #[arg(required = true)]
+        packages: Vec<String>,
+    },
     Interactive,
 }
 

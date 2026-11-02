@@ -6,6 +6,9 @@ use crate::i18n;
 use crate::scripts::{BUILTIN_SCRIPTS, ScriptFolder};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
+    let previous_screen = app.screen;
+    let previous_status = app.status.clone();
+
     // Global Ctrl+C quit (disabled on Shell; send to stdin instead)
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && (key.code == KeyCode::Char('c') || key.code == KeyCode::Char('C'))
@@ -15,12 +18,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     // Global quit (except when typing text)
-    if !app.filter_mode
+    if !app.apps.filter_mode
         && app.screen != Screen::InstallApk
         && app.screen != Screen::OutputPath
-        && !(app.screen == Screen::Network && app.network_input_mode)
-        && !(app.screen == Screen::Network && app.wifi_subnet_input_mode)
-        && !(app.screen == Screen::WifiConnect && app.wifi_connect_input_mode)
+        && !(app.screen == Screen::Network && app.network.network_input_mode)
+        && !(app.screen == Screen::Network && app.network.wifi_subnet_input_mode)
+        && !(app.screen == Screen::WifiConnect && app.network.wifi_connect_input_mode)
         && key.code == KeyCode::Char('q')
     {
         app.should_quit = true;
@@ -29,6 +32,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
     match app.screen {
         Screen::DeviceSelect => handle_device_select(app, key),
+        Screen::DeviceDiscover | Screen::DiscoverDevices | Screen::DeviceDiscovery => {
+            handle_device_discover(app, key)
+        }
+        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected => {
+            handle_connected_devices(app, key)
+        }
         Screen::MainMenu => handle_main_menu(app, key),
         Screen::Scripts => handle_scripts(app, key),
         Screen::ScriptFolders => handle_script_folders(app, key),
@@ -52,19 +61,49 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Screen::StorageUsage => handle_storage_usage(app, key),
         Screen::StorageVolumes => handle_storage_volumes(app, key),
     }
+
+    // Evita que hints/mensajes de un modo anterior sigan mostrándose
+    // como caja separada al cambiar de pestaña/modo.
+    if app.screen != previous_screen && app.status == previous_status {
+        app.status.clear();
+    }
 }
 
 pub fn handle_device_select(app: &mut App, key: KeyEvent) {
-    let total = app.devices.len() + 2;
+    let total = 2;
     match key.code {
         KeyCode::Up => {
-            if !app.loading {
-                App::move_list(&mut app.device_state, total, -1);
+            App::move_list(&mut app.device_state, total, -1);
+        }
+        KeyCode::Down => {
+            App::move_list(&mut app.device_state, total, 1);
+        }
+        KeyCode::Enter => {
+            let selected = app.device_state.selected().unwrap_or(0);
+            if selected == 0 {
+                app.open_connected_devices();
+            } else {
+                app.open_device_discover();
+            }
+        }
+        KeyCode::Esc => {
+            app.screen = Screen::MainMenu;
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_connected_devices(app: &mut App, key: KeyEvent) {
+    let total = app.devices.len();
+    match key.code {
+        KeyCode::Up => {
+            if !app.loading && total > 0 {
+                App::move_list(&mut app.connected_devices_state, total, -1);
             }
         }
         KeyCode::Down => {
-            if !app.loading {
-                App::move_list(&mut app.device_state, total, 1);
+            if !app.loading && total > 0 {
+                App::move_list(&mut app.connected_devices_state, total, 1);
             }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -72,32 +111,53 @@ pub fn handle_device_select(app: &mut App, key: KeyEvent) {
             app.status = i18n::tr("device.select.loading");
         }
         KeyCode::Enter => {
-            let selected = app.device_state.selected().unwrap_or(0);
-            if selected < app.devices.len() {
-                if app.devices.is_empty() {
-                    app.loading = true;
-                    app.status = i18n::tr("device.select.loading");
-                    return;
-                }
-                let device = &app.devices[selected];
-                if device.state != "device" {
-                    app.status = format!("{} ({})", i18n::tr("app.status.no_device"), device.state);
-                    return;
-                }
-                let serial = device.serial.clone();
-                app.select_device(serial);
-            } else if selected == app.devices.len() {
+            let selected = app.connected_devices_state.selected().unwrap_or(0);
+            if app.devices.is_empty() {
+                app.loading = true;
+                app.status = i18n::tr("device.select.loading");
+                return;
+            }
+            if selected >= app.devices.len() {
+                return;
+            }
+            let device = &app.devices[selected];
+            if device.state != "device" {
+                app.status = format!("{} ({})", i18n::tr("app.status.no_device"), device.state);
+                return;
+            }
+            let serial = device.serial.clone();
+            app.select_device(serial);
+        }
+        KeyCode::Esc => {
+            app.open_device_select();
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_device_discover(app: &mut App, key: KeyEvent) {
+    let total = 2;
+    match key.code {
+        KeyCode::Up => {
+            App::move_list(&mut app.device_discover_state, total, -1);
+        }
+        KeyCode::Down => {
+            App::move_list(&mut app.device_discover_state, total, 1);
+        }
+        KeyCode::Enter => {
+            let selected = app.device_discover_state.selected().unwrap_or(0);
+            if selected == 0 {
                 app.open_wifi_discover();
             } else {
                 app.screen = Screen::WifiConnect;
-                app.wifi_connect_input.clear();
-                app.wifi_connect_result = None;
-                app.wifi_connect_input_mode = true;
+                app.network.wifi_connect_input.clear();
+                app.network.wifi_connect_result = None;
+                app.network.wifi_connect_input_mode = true;
                 app.status = i18n::tr("wifi.connect.hint");
             }
         }
         KeyCode::Esc => {
-            app.screen = Screen::MainMenu;
+            app.open_device_select();
         }
         _ => {}
     }
@@ -130,8 +190,8 @@ pub fn handle_main_menu(app: &mut App, key: KeyEvent) {
 pub fn handle_scripts(app: &mut App, key: KeyEvent) {
     let len = BUILTIN_SCRIPTS.len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.scripts_menu_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.scripts_menu_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.scripts.scripts_menu_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.scripts.scripts_menu_state, len, 1),
         KeyCode::Enter => app.open_script_folders(),
         KeyCode::Esc => app.screen = Screen::DeviceMenu,
         _ => {}
@@ -141,8 +201,8 @@ pub fn handle_scripts(app: &mut App, key: KeyEvent) {
 pub fn handle_script_folders(app: &mut App, key: KeyEvent) {
     let len = ScriptFolder::ALL.len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.script_folder_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.script_folder_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.scripts.script_folder_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.scripts.script_folder_state, len, 1),
         KeyCode::Char(' ') => app.toggle_script_folder(),
         KeyCode::Enter => app.start_el_negro_samuel(),
         KeyCode::Esc => app.open_scripts(),
@@ -206,13 +266,13 @@ pub fn handle_logcat(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_processes(app: &mut App, key: KeyEvent) {
-    if app.process_pending.is_some() {
+    if app.processes.process_pending.is_some() {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 app.execute_process_kill();
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                app.process_pending = None;
+                app.processes.process_pending = None;
                 app.status = i18n::tr("processes.hint");
             }
             _ => {}
@@ -220,23 +280,23 @@ pub fn handle_processes(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    if app.process_filter_mode {
+    if app.processes.process_filter_mode {
         match key.code {
             KeyCode::Esc => {
-                if !app.process_filter.is_empty() {
-                    app.process_filter.clear();
+                if !app.processes.process_filter.is_empty() {
+                    app.processes.process_filter.clear();
                 } else {
-                    app.process_filter_mode = false;
+                    app.processes.process_filter_mode = false;
                 }
             }
             KeyCode::Enter => {
-                app.process_filter_mode = false;
+                app.processes.process_filter_mode = false;
             }
             KeyCode::Backspace => {
-                app.process_filter.pop();
+                app.processes.process_filter.pop();
             }
             KeyCode::Char(c) => {
-                app.process_filter.push(c);
+                app.processes.process_filter.push(c);
             }
             _ => {}
         }
@@ -245,18 +305,18 @@ pub fn handle_processes(app: &mut App, key: KeyEvent) {
 
     let len = app.filtered_process_indices().len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.process_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.process_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.processes.process_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.processes.process_state, len, 1),
         KeyCode::Char('/') => {
-            app.process_filter_mode = true;
+            app.processes.process_filter_mode = true;
         }
         KeyCode::Char('r') | KeyCode::Char('R') => app.load_processes(),
         KeyCode::Enter | KeyCode::Char('k') | KeyCode::Char('K') => app.request_process_kill(),
         KeyCode::Esc => {
-            if !app.process_filter.is_empty() {
-                app.process_filter.clear();
+            if !app.processes.process_filter.is_empty() {
+                app.processes.process_filter.clear();
             } else {
-                app.process_pending = None;
+                app.processes.process_pending = None;
                 app.screen = Screen::DeviceMenu;
             }
         }
@@ -317,28 +377,29 @@ pub fn handle_language(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_apps_menu(app: &mut App, key: KeyEvent) {
-    let len = app.apps_menu_keys.len();
+    let len = app.apps.apps_menu_keys.len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.apps_menu_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.apps_menu_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.apps.apps_menu_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.apps.apps_menu_state, len, 1),
         KeyCode::Enter => {
-            let i = app.apps_menu_state.selected().unwrap_or(0);
+            app.ensure_app_cache();
+            let i = app.apps.apps_menu_state.selected().unwrap_or(0);
             match i {
                 0 => {
                     if let Err(e) = app.ensure_safety() {
                         app.status = rust_i18n::t!("app.error", error = e).to_string();
                     }
-                    app.app_action = AppAction::Uninstall;
-                    app.app_view = AppView::Installed;
+                    app.apps.app_action = AppAction::Uninstall;
+                    app.apps.app_view = AppView::Installed;
                     if !app.list_cache_matches(AppAction::Uninstall, AppView::Installed) {
                         app.load_packages(false);
                     }
-                    app.status = i18n::tr("apps.status.help");
+                    app.status.clear();
                     app.screen = Screen::AppList;
                 }
                 1 => {
-                    app.apk_input.clear();
-                    app.apk_result = None;
+                    app.apps.apk_input.clear();
+                    app.apps.apk_result = None;
                     app.status = i18n::tr("apps.install.hint");
                     app.screen = Screen::InstallApk;
                 }
@@ -346,36 +407,60 @@ pub fn handle_apps_menu(app: &mut App, key: KeyEvent) {
                     if let Err(e) = app.ensure_safety() {
                         app.status = rust_i18n::t!("app.error", error = e).to_string();
                     }
-                    app.app_action = AppAction::Reinstall;
-                    app.app_view = AppView::Available;
+                    app.apps.app_action = AppAction::Reinstall;
+                    app.apps.app_view = AppView::Available;
                     if !app.list_cache_matches(AppAction::Reinstall, AppView::Available) {
                         app.load_available();
                     }
-                    app.status = i18n::tr("apps.status.help");
+                    app.status.clear();
                     app.screen = Screen::AppList;
                 }
                 3 => {
                     if let Err(e) = app.ensure_safety() {
                         app.status = rust_i18n::t!("app.error", error = e).to_string();
                     }
-                    app.app_action = AppAction::Enable;
-                    app.app_view = AppView::Installed;
+                    app.apps.app_action = AppAction::Enable;
+                    app.apps.app_view = AppView::Installed;
                     if !app.list_cache_matches(AppAction::Enable, AppView::Installed) {
                         app.load_disabled_packages();
                     }
-                    app.status = i18n::tr("apps.status.help");
+                    app.status.clear();
                     app.screen = Screen::AppList;
                 }
                 4 => {
                     if let Err(e) = app.ensure_safety() {
                         app.status = rust_i18n::t!("app.error", error = e).to_string();
                     }
-                    app.app_action = AppAction::ClearCache;
-                    app.app_view = AppView::Installed;
+                    app.apps.app_action = AppAction::ClearCache;
+                    app.apps.app_view = AppView::Installed;
                     if !app.list_cache_matches(AppAction::ClearCache, AppView::Installed) {
                         app.load_packages(false);
                     }
-                    app.status = i18n::tr("apps.status.help");
+                    app.status.clear();
+                    app.screen = Screen::AppList;
+                }
+                5 => {
+                    if let Err(e) = app.ensure_safety() {
+                        app.status = rust_i18n::t!("app.error", error = e).to_string();
+                    }
+                    app.apps.app_action = AppAction::ForceStop;
+                    app.apps.app_view = AppView::Installed;
+                    if !app.list_cache_matches(AppAction::ForceStop, AppView::Installed) {
+                        app.load_packages(false);
+                    }
+                    app.status.clear();
+                    app.screen = Screen::AppList;
+                }
+                6 => {
+                    if let Err(e) = app.ensure_safety() {
+                        app.status = rust_i18n::t!("app.error", error = e).to_string();
+                    }
+                    app.apps.app_action = AppAction::ClearData;
+                    app.apps.app_view = AppView::Installed;
+                    if !app.list_cache_matches(AppAction::ClearData, AppView::Installed) {
+                        app.load_packages(false);
+                    }
+                    app.status.clear();
                     app.screen = Screen::AppList;
                 }
                 _ => {}
@@ -393,20 +478,20 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
         app.status = rust_i18n::t!("app.error", error = e).to_string();
     }
 
-    if app.filter_mode {
+    if app.apps.filter_mode {
         match key.code {
             KeyCode::Esc => {
-                app.filter_mode = false;
+                app.apps.filter_mode = false;
             }
             KeyCode::Enter => {
-                app.filter_mode = false;
+                app.apps.filter_mode = false;
             }
             KeyCode::Backspace => {
-                app.filter.pop();
+                app.apps.filter.pop();
                 app.invalidate_list_cache();
             }
             KeyCode::Char(c) => {
-                app.filter.push(c);
+                app.apps.filter.push(c);
                 app.invalidate_list_cache();
             }
             _ => {}
@@ -418,26 +503,24 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Tab => {
             use crate::tui::app::SortMode;
-            app.sort_mode = match app.sort_mode {
+            app.apps.sort_mode = match app.apps.sort_mode {
                 SortMode::NameAsc => SortMode::NameDesc,
                 SortMode::NameDesc => SortMode::CriticalFirst,
                 SortMode::CriticalFirst => SortMode::CriticalLast,
                 SortMode::CriticalLast => SortMode::NameAsc,
             };
             app.invalidate_list_cache();
-            app.status =
-                rust_i18n::t!("apps.status.sort", mode = app.sort_mode.label()).to_string();
         }
         KeyCode::Right => {
-            let new_view = match app.app_view {
+            let new_view = match app.apps.app_view {
                 crate::tui::app::AppView::Installed => {
                     app.load_available();
                     crate::tui::app::AppView::Available
                 }
                 crate::tui::app::AppView::Available => {
-                    if app.app_action == crate::tui::app::AppAction::Enable {
+                    if app.apps.app_action == crate::tui::app::AppAction::Enable {
                         app.load_disabled_packages();
-                    } else if app.app_action == crate::tui::app::AppAction::Uninstall {
+                    } else if app.apps.app_action == crate::tui::app::AppAction::Uninstall {
                         app.load_packages(false);
                     } else {
                         app.load_packages(true);
@@ -445,19 +528,19 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
                     crate::tui::app::AppView::Installed
                 }
             };
-            app.app_view = new_view;
+            app.apps.app_view = new_view;
             app.invalidate_list_cache();
         }
         KeyCode::Left => {
-            let new_view = match app.app_view {
+            let new_view = match app.apps.app_view {
                 crate::tui::app::AppView::Installed => {
                     app.load_available();
                     crate::tui::app::AppView::Available
                 }
                 crate::tui::app::AppView::Available => {
-                    if app.app_action == crate::tui::app::AppAction::Enable {
+                    if app.apps.app_action == crate::tui::app::AppAction::Enable {
                         app.load_disabled_packages();
-                    } else if app.app_action == crate::tui::app::AppAction::Uninstall {
+                    } else if app.apps.app_action == crate::tui::app::AppAction::Uninstall {
                         app.load_packages(false);
                     } else {
                         app.load_packages(true);
@@ -465,20 +548,20 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
                     crate::tui::app::AppView::Installed
                 }
             };
-            app.app_view = new_view;
+            app.apps.app_view = new_view;
             app.invalidate_list_cache();
         }
-        KeyCode::Up => App::move_list(&mut app.app_state, filtered_len, -1),
-        KeyCode::Down => App::move_list(&mut app.app_state, filtered_len, 1),
+        KeyCode::Up => App::move_list(&mut app.apps.app_state, filtered_len, -1),
+        KeyCode::Down => App::move_list(&mut app.apps.app_state, filtered_len, 1),
         KeyCode::Char(' ') => app.toggle_selected(),
         KeyCode::Char('/') => {
-            app.filter_mode = true;
+            app.apps.filter_mode = true;
         }
-        KeyCode::Char('r') => match app.app_view {
+        KeyCode::Char('r') => match app.apps.app_view {
             crate::tui::app::AppView::Installed => {
-                if app.app_action == crate::tui::app::AppAction::Enable {
+                if app.apps.app_action == crate::tui::app::AppAction::Enable {
                     app.load_disabled_packages();
-                } else if app.app_action == crate::tui::app::AppAction::Uninstall {
+                } else if app.apps.app_action == crate::tui::app::AppAction::Uninstall {
                     app.load_packages(false);
                 } else {
                     app.load_packages(true);
@@ -487,24 +570,24 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
             crate::tui::app::AppView::Available => app.load_available(),
         },
         KeyCode::Char('F') => {
-            app.force_mode = !app.force_mode;
-            if app.force_mode {
+            app.apps.force_mode = !app.apps.force_mode;
+            if app.apps.force_mode {
                 app.status = i18n::tr("apps.status.force_on");
             } else {
                 app.status = i18n::tr("apps.status.force_off");
             }
         }
         KeyCode::Char('I') => {
-            app.apk_input.clear();
-            app.apk_result = None;
+            app.apps.apk_input.clear();
+            app.apps.apk_result = None;
             app.status = i18n::tr("apps.install.hint");
             app.screen = Screen::InstallApk;
         }
         KeyCode::Enter => {
-            if app.selected.is_empty() {
+            if app.apps.selected.is_empty() {
                 app.status = i18n::tr("apps.status.select_with_space");
             } else {
-                match app.app_action {
+                match app.apps.app_action {
                     crate::tui::app::AppAction::Uninstall => {
                         app.screen = Screen::Confirm;
                     }
@@ -517,15 +600,17 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
                     crate::tui::app::AppAction::ClearCache => {
                         app.clear_cache_selected();
                     }
+                    crate::tui::app::AppAction::ForceStop => {
+                        app.force_stop_selected();
+                    }
+                    crate::tui::app::AppAction::ClearData => {
+                        app.clear_data_selected();
+                    }
                 }
             }
         }
         KeyCode::Esc => {
-            if app.app_action == crate::tui::app::AppAction::ClearCache {
-                app.screen = Screen::StorageMenu;
-            } else {
-                app.screen = Screen::AppsMenu;
-            }
+            app.screen = Screen::AppsMenu;
         }
         _ => {}
     }
@@ -534,21 +619,21 @@ pub fn handle_app_list(app: &mut App, key: KeyEvent) {
 pub fn handle_install_apk(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.apk_input.clear();
-            app.apk_result = None;
+            app.apps.apk_input.clear();
+            app.apps.apk_result = None;
             app.status.clear();
             app.screen = Screen::AppsMenu;
         }
         KeyCode::Enter => {
-            if app.apk_result.is_some() {
-                app.apk_input.clear();
-                app.apk_result = None;
+            if app.apps.apk_result.is_some() {
+                app.apps.apk_input.clear();
+                app.apps.apk_result = None;
                 return;
             }
 
-            let path = app.apk_input.trim().to_string();
+            let path = app.apps.apk_input.trim().to_string();
             if let Err(e) = crate::validate::apk_path(&path) {
-                app.apk_result = Some(ApkResult {
+                app.apps.apk_result = Some(ApkResult {
                     text: e.to_string(),
                     is_error: true,
                 });
@@ -556,14 +641,14 @@ pub fn handle_install_apk(app: &mut App, key: KeyEvent) {
             }
 
             let Some(serial) = app.serial.clone() else {
-                app.apk_result = Some(ApkResult {
+                app.apps.apk_result = Some(ApkResult {
                     text: i18n::tr("apps.install.error.no_device"),
                     is_error: true,
                 });
                 return;
             };
 
-            app.apk_result = Some(
+            app.apps.apk_result = Some(
                 match crate::package::install_apk(&app.adb, &serial, &path) {
                     Ok(result) => ApkResult {
                         text: rust_i18n::t!("apps.install.success", result = result).to_string(),
@@ -577,19 +662,19 @@ pub fn handle_install_apk(app: &mut App, key: KeyEvent) {
             );
         }
         KeyCode::Backspace => {
-            if app.apk_result.is_some() {
-                app.apk_result = None;
-                app.apk_input.clear();
+            if app.apps.apk_result.is_some() {
+                app.apps.apk_result = None;
+                app.apps.apk_input.clear();
             } else {
-                app.apk_input.pop();
+                app.apps.apk_input.pop();
             }
         }
         KeyCode::Char(c) => {
-            if app.apk_result.is_some() {
-                app.apk_result = None;
-                app.apk_input.clear();
+            if app.apps.apk_result.is_some() {
+                app.apps.apk_result = None;
+                app.apps.apk_input.clear();
             }
-            app.apk_input.push(c);
+            app.apps.apk_input.push(c);
         }
         _ => {}
     }
@@ -597,11 +682,21 @@ pub fn handle_install_apk(app: &mut App, key: KeyEvent) {
 
 pub fn handle_confirm(app: &mut App, key: KeyEvent) {
     match key.code {
+        KeyCode::Char(' ') => {
+            app.apps.uninstall_keep_data = !app.apps.uninstall_keep_data;
+            if app.apps.uninstall_keep_data {
+                app.status = i18n::tr("confirm.keep_data_on");
+            } else {
+                app.status = i18n::tr("confirm.keep_data_off");
+            }
+        }
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
             app.uninstall_selected();
+            app.apps.uninstall_keep_data = false;
             app.screen = Screen::AppList;
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.apps.uninstall_keep_data = false;
             app.screen = Screen::AppList;
         }
         _ => {}
@@ -657,107 +752,194 @@ pub fn handle_device_control(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_network(app: &mut App, key: KeyEvent) {
-    if app.wifi_subnet_input_mode {
+    if app.network.wifi_subnet_input_mode {
         match key.code {
-            KeyCode::Char(c) => app.wifi_subnet_input.push(c),
+            KeyCode::Char(c) => app.network.wifi_subnet_input.push(c),
             KeyCode::Backspace => {
-                app.wifi_subnet_input.pop();
+                app.network.wifi_subnet_input.pop();
             }
             KeyCode::Enter => {
                 app.apply_wifi_subnet();
             }
             KeyCode::Esc => {
-                app.wifi_subnet_input_mode = false;
-                app.wifi_subnet_input.clear();
+                app.network.wifi_subnet_input_mode = false;
+                app.network.wifi_subnet_input.clear();
             }
             _ => {}
         }
         return;
     }
 
-    if app.network_input_mode {
+    if app.network.network_input_mode {
         match key.code {
-            KeyCode::Char(c) => app.network_input.push(c),
+            KeyCode::Char(c) => app.network.network_input.push(c),
             KeyCode::Backspace => {
-                app.network_input.pop();
+                app.network.network_input.pop();
             }
             KeyCode::Enter => {
-                let input = app.network_input.trim().to_string();
+                let input = app.network.network_input.trim().to_string();
                 if input.is_empty() {
                     app.status = i18n::tr("network.status.enter_ip");
                 } else {
                     let endpoint = crate::adb::normalize_network_endpoint(&input);
-                    app.network_pending = Some(NetworkAction::Connect);
-                    app.network_pending_endpoint = Some(endpoint);
-                    app.network_input_mode = false;
-                    app.network_input.clear();
+                    app.network.network_pending = Some(NetworkAction::Connect);
+                    app.network.network_pending_endpoint = Some(endpoint);
+                    app.network.network_input_mode = false;
+                    app.network.network_input.clear();
                 }
             }
             KeyCode::Esc => {
-                app.network_input_mode = false;
-                app.network_input.clear();
+                app.network.network_input_mode = false;
+                app.network.network_input.clear();
             }
             _ => {}
         }
         return;
     }
 
-    if app.network_pending.is_some() {
+    if app.network.network_pending.is_some() {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                let action = app.network_pending.unwrap();
-                app.execute_network_action(action);
+                let action = app.network.network_pending.unwrap();
+                let serial = app.serial.clone().unwrap_or_default();
+                let adb = app.adb.clone();
+                let endpoint = app
+                    .network
+                    .network_pending_endpoint
+                    .clone()
+                    .unwrap_or_default();
+                let kind = match action {
+                    NetworkAction::Enable => "enable",
+                    NetworkAction::Connect => "connect",
+                    NetworkAction::Disconnect => "disconnect",
+                    NetworkAction::Disable => "disable",
+                };
+                app.start_network_action(kind, move || match action {
+                    NetworkAction::Enable => crate::adb::wifi_adb_enable(&adb, &serial, 5555)
+                        .map(|_| i18n::tr("network.status.enabled"))
+                        .map_err(|e| rust_i18n::t!("app.error", error = e).to_string()),
+                    NetworkAction::Connect => {
+                        let ep = crate::adb::normalize_network_endpoint(&endpoint);
+                        if ep.is_empty() || ep == ":5555" {
+                            Err(i18n::tr("network.status.invalid_ip"))
+                        } else {
+                            crate::adb::wifi_adb_connect(&adb, &ep)
+                                .map(|_| {
+                                    rust_i18n::t!(
+                                        "network.status.wifi_adb_connected",
+                                        endpoint = ep
+                                    )
+                                    .to_string()
+                                })
+                                .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                        }
+                    }
+                    NetworkAction::Disconnect => crate::adb::wifi_adb_disconnect(&adb, &endpoint)
+                        .map(|_| i18n::tr("network.status.wifi_adb_disconnected"))
+                        .map_err(|e| rust_i18n::t!("app.error", error = e).to_string()),
+                    NetworkAction::Disable => crate::adb::wifi_adb_disable(&adb, &endpoint)
+                        .map(|_| i18n::tr("network.status.wifi_adb_disabled"))
+                        .map_err(|e| rust_i18n::t!("app.error", error = e).to_string()),
+                });
+                app.network.network_pending = None;
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                app.network_pending = None;
-                app.network_pending_endpoint = None;
+                app.network.network_pending = None;
+                app.network.network_pending_endpoint = None;
             }
             _ => {}
         }
         return;
     }
 
-    let len = app.network_menu_keys.len();
+    let len = app.network.network_menu_keys.len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.network_menu_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.network_menu_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.network.network_menu_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.network.network_menu_state, len, 1),
         KeyCode::Enter => {
-            let i = app.network_menu_state.selected().unwrap_or(0);
-            match i {
-                0 => app.load_network_info(),
-                1 => {
-                    if app.network_endpoint.is_some() {
-                        if let Some(ep) = app.network_endpoint.clone() {
-                            app.network_pending = Some(NetworkAction::Disconnect);
-                            app.network_pending_endpoint = Some(ep);
-                        }
-                    } else {
-                        app.network_pending = Some(NetworkAction::Enable);
+            let i = app.network.network_menu_state.selected().unwrap_or(0);
+            let serial = app.serial.clone().unwrap_or_default();
+            let key = app.network.network_menu_keys.get(i).copied().unwrap_or("");
+            match key {
+                "network.menu.info" => app.load_network_info(),
+                "network.menu.wifi_on" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_wifi_enabled(&adb, &serial, true)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.wifi_off" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_wifi_enabled(&adb, &serial, false)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.data_on" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_mobile_data_enabled(&adb, &serial, true)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.data_off" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_mobile_data_enabled(&adb, &serial, false)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.airplane_on" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_airplane_mode(&adb, &serial, true)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.airplane_off" => {
+                    let adb = app.adb.clone();
+                    let serial = serial.clone();
+                    app.start_network_action("toggle", move || {
+                        crate::adb::set_airplane_mode(&adb, &serial, false)
+                            .map_err(|e| rust_i18n::t!("app.error", error = e).to_string())
+                    });
+                }
+                "network.menu.disconnect" => {
+                    if let Some(ep) = app.network.network_endpoint.clone() {
+                        app.network.network_pending = Some(NetworkAction::Disconnect);
+                        app.network.network_pending_endpoint = Some(ep);
                     }
                 }
-                2 => {
-                    if app.network_endpoint.is_some() {
-                        // Disable Wi-Fi ADB (switch to USB mode)
-                        if let Some(ep) = app.network_endpoint.clone() {
-                            app.network_pending = Some(NetworkAction::Disable);
-                            app.network_pending_endpoint = Some(ep);
-                        }
-                    } else if let Some(ip) = app.network_ip.clone() {
-                        app.network_pending = Some(NetworkAction::Connect);
-                        app.network_pending_endpoint =
+                "network.menu.disable" => {
+                    if let Some(ep) = app.network.network_endpoint.clone() {
+                        app.network.network_pending = Some(NetworkAction::Disable);
+                        app.network.network_pending_endpoint = Some(ep);
+                    }
+                }
+                "network.menu.enable" => {
+                    app.network.network_pending = Some(NetworkAction::Enable);
+                }
+                "network.menu.connect" => {
+                    if let Some(ip) = app.network.network_ip.clone() {
+                        app.network.network_pending = Some(NetworkAction::Connect);
+                        app.network.network_pending_endpoint =
                             Some(crate::adb::normalize_network_endpoint(&ip));
                     } else {
-                        app.network_input_mode = true;
-                        app.network_input.clear();
+                        app.network.network_input_mode = true;
+                        app.network.network_input.clear();
                         app.status = i18n::tr("network.status.enter_ip");
                     }
                 }
-                3 => {
-                    // Set subnet (both states)
+                "network.menu.set_subnet" => {
                     app.open_wifi_subnet_input();
                 }
-                4 => {
-                    // Back (both states)
+                "network.menu.back" => {
                     app.screen = Screen::DeviceMenu;
                 }
                 _ => {}
@@ -770,7 +952,7 @@ pub fn handle_network(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
-    if app.wifi_scanning {
+    if app.network.wifi_scanning {
         if key.code == KeyCode::Esc {
             // dejar que el escaneo termine en background; volver a device select
             app.open_device_select();
@@ -778,51 +960,52 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    let len = if app.wifi_show_rejected {
-        app.wifi_discovered.len() + app.wifi_rejected.len()
+    let len = if app.network.wifi_show_rejected {
+        app.network.wifi_discovered.len() + app.network.wifi_rejected.len()
     } else {
-        app.wifi_discovered.len()
+        app.network.wifi_discovered.len()
     };
     match key.code {
         KeyCode::Up => {
             if len > 0 {
-                App::move_list(&mut app.wifi_discover_state, len, -1);
+                App::move_list(&mut app.network.wifi_discover_state, len, -1);
             }
         }
         KeyCode::Down => {
             if len > 0 {
-                App::move_list(&mut app.wifi_discover_state, len, 1);
+                App::move_list(&mut app.network.wifi_discover_state, len, 1);
             }
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            app.wifi_show_rejected = !app.wifi_show_rejected;
-            let new_len = if app.wifi_show_rejected {
-                app.wifi_discovered.len() + app.wifi_rejected.len()
+            app.network.wifi_show_rejected = !app.network.wifi_show_rejected;
+            let new_len = if app.network.wifi_show_rejected {
+                app.network.wifi_discovered.len() + app.network.wifi_rejected.len()
             } else {
-                app.wifi_discovered.len()
+                app.network.wifi_discovered.len()
             };
             if new_len == 0 {
-                app.wifi_discover_state.select(None);
+                app.network.wifi_discover_state.select(None);
             } else {
                 let sel = app
+                    .network
                     .wifi_discover_state
                     .selected()
                     .unwrap_or(0)
                     .min(new_len - 1);
-                app.wifi_discover_state.select(Some(sel));
+                app.network.wifi_discover_state.select(Some(sel));
             }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             app.start_wifi_scan();
         }
         KeyCode::Enter => {
-            let Some(i) = app.wifi_discover_state.selected() else {
+            let Some(i) = app.network.wifi_discover_state.selected() else {
                 return;
             };
-            if i >= app.wifi_discovered.len() {
+            if i >= app.network.wifi_discovered.len() {
                 return;
             }
-            let endpoint = app.wifi_discovered[i].clone();
+            let endpoint = app.network.wifi_discovered[i].clone();
             if app.devices.iter().any(|d| d.serial == endpoint) {
                 app.select_device(endpoint);
                 return;
@@ -877,18 +1060,18 @@ pub fn handle_wifi_discover(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
-    if app.wifi_connect_input_mode {
+    if app.network.wifi_connect_input_mode {
         match key.code {
             KeyCode::Char(c) => {
-                app.wifi_connect_input.push(c);
+                app.network.wifi_connect_input.push(c);
             }
             KeyCode::Backspace => {
-                app.wifi_connect_input.pop();
+                app.network.wifi_connect_input.pop();
             }
             KeyCode::Enter => {
-                let input = app.wifi_connect_input.trim().to_string();
+                let input = app.network.wifi_connect_input.trim().to_string();
                 if input.is_empty() {
-                    app.wifi_connect_result = Some(ApkResult {
+                    app.network.wifi_connect_result = Some(ApkResult {
                         text: i18n::tr("wifi.connect.empty"),
                         is_error: true,
                     });
@@ -897,7 +1080,7 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                 }
                 let endpoint = crate::adb::normalize_network_endpoint(&input);
                 if endpoint.is_empty() {
-                    app.wifi_connect_result = Some(ApkResult {
+                    app.network.wifi_connect_result = Some(ApkResult {
                         text: i18n::tr("wifi.connect.invalid"),
                         is_error: true,
                     });
@@ -937,14 +1120,14 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                         } else {
                             app.status = i18n::tr("wifi.status.connected");
                         }
-                        app.wifi_connect_result = Some(ApkResult {
+                        app.network.wifi_connect_result = Some(ApkResult {
                             text: i18n::tr("wifi.status.connected"),
                             is_error: false,
                         });
                         app.status = i18n::tr("wifi.status.connected");
                     }
                     Err(e) => {
-                        app.wifi_connect_result = Some(ApkResult {
+                        app.network.wifi_connect_result = Some(ApkResult {
                             text: rust_i18n::t!("app.error", error = e).to_string(),
                             is_error: true,
                         });
@@ -953,9 +1136,9 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Esc => {
-                app.wifi_connect_input.clear();
-                app.wifi_connect_result = None;
-                app.wifi_connect_input_mode = false;
+                app.network.wifi_connect_input.clear();
+                app.network.wifi_connect_result = None;
+                app.network.wifi_connect_input_mode = false;
                 app.open_device_select();
             }
             _ => {}
@@ -964,9 +1147,9 @@ pub fn handle_wifi_connect(app: &mut App, key: KeyEvent) {
     }
 
     if key.code == KeyCode::Esc {
-        app.wifi_connect_input.clear();
-        app.wifi_connect_result = None;
-        app.wifi_connect_input_mode = false;
+        app.network.wifi_connect_input.clear();
+        app.network.wifi_connect_result = None;
+        app.network.wifi_connect_input_mode = false;
         app.open_device_select();
     }
 }
@@ -991,27 +1174,27 @@ pub fn handle_output_path(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
-    if app.file_browser_input_mode {
+    if app.storage.file_browser_input_mode {
         match key.code {
-            KeyCode::Char(c) => app.file_browser_input.push(c),
+            KeyCode::Char(c) => app.storage.file_browser_input.push(c),
             KeyCode::Backspace => {
-                app.file_browser_input.pop();
+                app.storage.file_browser_input.pop();
             }
             KeyCode::Enter => {
-                app.file_browser_input_mode = false;
+                app.storage.file_browser_input_mode = false;
             }
             KeyCode::Esc => {
-                app.file_browser_input.clear();
-                app.file_browser_input_mode = false;
+                app.storage.file_browser_input.clear();
+                app.storage.file_browser_input_mode = false;
             }
             _ => {}
         }
         return;
     }
-    if app.file_browser_pending_delete.is_some() {
+    if app.storage.file_browser_pending_delete.is_some() {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if let Some(path) = app.file_browser_pending_delete.take() {
+                if let Some(path) = app.storage.file_browser_pending_delete.take() {
                     if crate::adb::validate_remote_path(&path) {
                         let _ = crate::adb::remove_remote(
                             &app.adb,
@@ -1023,7 +1206,7 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                app.file_browser_pending_delete = None;
+                app.storage.file_browser_pending_delete = None;
                 app.status = i18n::tr("files.hint").to_string();
             }
             _ => {}
@@ -1031,14 +1214,15 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
         return;
     }
     let filtered: Vec<usize> = app
+        .storage
         .file_browser_entries
         .iter()
         .enumerate()
         .filter(|(_, e)| {
-            app.file_browser_filter.is_empty()
+            app.storage.file_browser_filter.is_empty()
                 || e.name
                     .to_lowercase()
-                    .contains(&app.file_browser_filter.to_lowercase())
+                    .contains(&app.storage.file_browser_filter.to_lowercase())
         })
         .map(|(i, _)| i)
         .collect();
@@ -1046,25 +1230,25 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Up => {
             if len > 0 {
-                App::move_list(&mut app.file_browser_state, len, -1);
+                App::move_list(&mut app.storage.file_browser_state, len, -1);
             }
         }
         KeyCode::Down => {
             if len > 0 {
-                App::move_list(&mut app.file_browser_state, len, 1);
+                App::move_list(&mut app.storage.file_browser_state, len, 1);
             }
         }
         KeyCode::Left => {
             // subir nivel
-            let p = app.file_browser_path.trim_end_matches('/');
+            let p = app.storage.file_browser_path.trim_end_matches('/');
             if let Some(pos) = p.rfind('/') {
                 if pos == 0 {
-                    app.file_browser_path = "/".to_string();
+                    app.storage.file_browser_path = "/".to_string();
                 } else {
-                    app.file_browser_path = p[..pos].to_string();
+                    app.storage.file_browser_path = p[..pos].to_string();
                 }
-                if app.file_browser_path.is_empty() {
-                    app.file_browser_path = "/".to_string();
+                if app.storage.file_browser_path.is_empty() {
+                    app.storage.file_browser_path = "/".to_string();
                 }
                 app.load_file_browser();
             } else {
@@ -1072,53 +1256,53 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Right => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             if entry.is_dir {
-                let new_path = if app.file_browser_path.ends_with('/') {
-                    format!("{}{}", app.file_browser_path, entry.name)
+                let new_path = if app.storage.file_browser_path.ends_with('/') {
+                    format!("{}{}", app.storage.file_browser_path, entry.name)
                 } else {
-                    format!("{}/{}", app.file_browser_path, entry.name)
+                    format!("{}/{}", app.storage.file_browser_path, entry.name)
                 };
-                app.file_browser_path = new_path;
+                app.storage.file_browser_path = new_path;
                 app.load_file_browser();
             }
         }
         KeyCode::Enter => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             if entry.is_dir {
-                let new_path = if app.file_browser_path.ends_with('/') {
-                    format!("{}{}", app.file_browser_path, entry.name)
+                let new_path = if app.storage.file_browser_path.ends_with('/') {
+                    format!("{}{}", app.storage.file_browser_path, entry.name)
                 } else {
-                    format!("{}/{}", app.file_browser_path, entry.name)
+                    format!("{}/{}", app.storage.file_browser_path, entry.name)
                 };
-                app.file_browser_path = new_path;
+                app.storage.file_browser_path = new_path;
                 app.load_file_browser();
             }
         }
         KeyCode::Backspace => {
-            let p = app.file_browser_path.trim_end_matches('/');
+            let p = app.storage.file_browser_path.trim_end_matches('/');
             if let Some(pos) = p.rfind('/') {
                 if pos == 0 {
-                    app.file_browser_path = "/".to_string();
+                    app.storage.file_browser_path = "/".to_string();
                 } else {
-                    app.file_browser_path = p[..pos].to_string();
+                    app.storage.file_browser_path = p[..pos].to_string();
                 }
-                if app.file_browser_path.is_empty() {
-                    app.file_browser_path = "/".to_string();
+                if app.storage.file_browser_path.is_empty() {
+                    app.storage.file_browser_path = "/".to_string();
                 }
                 app.load_file_browser();
             } else {
@@ -1126,20 +1310,20 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             if entry.is_dir {
                 return;
             }
             let remote = format!(
                 "{}/{}",
-                app.file_browser_path.trim_end_matches('/'),
+                app.storage.file_browser_path.trim_end_matches('/'),
                 entry.name
             );
             let local = format!(
@@ -1158,45 +1342,49 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('c') | KeyCode::Char('C') => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             let path = format!(
                 "{}/{}",
-                app.file_browser_path.trim_end_matches('/'),
+                app.storage.file_browser_path.trim_end_matches('/'),
                 entry.name
             );
-            app.file_browser_clipboard = Some((path, false));
+            app.storage.file_browser_clipboard = Some((path, false));
             app.status = format!("Copied: {}", entry.name);
         }
         KeyCode::Char('m') | KeyCode::Char('M') => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             let path = format!(
                 "{}/{}",
-                app.file_browser_path.trim_end_matches('/'),
+                app.storage.file_browser_path.trim_end_matches('/'),
                 entry.name
             );
-            app.file_browser_clipboard = Some((path, true));
+            app.storage.file_browser_clipboard = Some((path, true));
             app.status = format!("Cut: {}", entry.name);
         }
         KeyCode::Char('v') | KeyCode::Char('V') => {
-            let Some((src, is_move)) = app.file_browser_clipboard.clone() else {
+            let Some((src, is_move)) = app.storage.file_browser_clipboard.clone() else {
                 return;
             };
             let name = src.rsplit('/').next().unwrap_or("file").to_string();
-            let dst = format!("{}/{}", app.file_browser_path.trim_end_matches('/'), name);
+            let dst = format!(
+                "{}/{}",
+                app.storage.file_browser_path.trim_end_matches('/'),
+                name
+            );
             let serial = app.serial.as_deref().unwrap_or("");
             let res = if is_move {
                 crate::adb::move_remote(&app.adb, serial, &src, &dst)
@@ -1206,7 +1394,7 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             match res {
                 Ok(_) => {
                     if is_move {
-                        app.file_browser_clipboard = None;
+                        app.storage.file_browser_clipboard = None;
                     }
                     app.status = format!("Pasted: {}", name);
                     app.load_file_browser();
@@ -1215,21 +1403,21 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('x') | KeyCode::Char('X') => {
-            let Some(sel) = app.file_browser_state.selected() else {
+            let Some(sel) = app.storage.file_browser_state.selected() else {
                 return;
             };
             if sel >= filtered.len() {
                 return;
             }
             let idx = filtered[sel];
-            let entry = &app.file_browser_entries[idx];
+            let entry = &app.storage.file_browser_entries[idx];
             let path = format!(
                 "{}/{}",
-                app.file_browser_path.trim_end_matches('/'),
+                app.storage.file_browser_path.trim_end_matches('/'),
                 entry.name
             );
             if crate::adb::validate_remote_path(&path) {
-                app.file_browser_pending_delete = Some(path);
+                app.storage.file_browser_pending_delete = Some(path);
                 app.status = i18n::tr("files.delete_confirm").to_string();
             } else {
                 app.status = i18n::tr("files.protected").to_string();
@@ -1239,27 +1427,27 @@ pub fn handle_file_browser(app: &mut App, key: KeyEvent) {
             app.load_file_browser();
         }
         KeyCode::Char('/') => {
-            app.file_browser_input_mode = true;
-            app.file_browser_input.clear();
-            app.file_browser_filter.clear();
+            app.storage.file_browser_input_mode = true;
+            app.storage.file_browser_input.clear();
+            app.storage.file_browser_filter.clear();
         }
         KeyCode::Esc => {
             app.screen = Screen::DeviceMenu;
         }
         _ => {}
     }
-    if app.file_browser_input_mode {
-        app.file_browser_filter = app.file_browser_input.clone();
+    if app.storage.file_browser_input_mode {
+        app.storage.file_browser_filter = app.storage.file_browser_input.clone();
     }
 }
 
 pub fn handle_storage_menu(app: &mut App, key: KeyEvent) {
-    let len = app.storage_menu_keys.len();
+    let len = app.storage.storage_menu_keys.len();
     match key.code {
-        KeyCode::Up => App::move_list(&mut app.storage_menu_state, len, -1),
-        KeyCode::Down => App::move_list(&mut app.storage_menu_state, len, 1),
+        KeyCode::Up => App::move_list(&mut app.storage.storage_menu_state, len, -1),
+        KeyCode::Down => App::move_list(&mut app.storage.storage_menu_state, len, 1),
         KeyCode::Enter => {
-            let i = app.storage_menu_state.selected().unwrap_or(0);
+            let i = app.storage.storage_menu_state.selected().unwrap_or(0);
             match i {
                 0 => app.open_file_browser(),
                 1 => app.open_storage_usage(),
@@ -1356,5 +1544,26 @@ mod tests {
         app.device_menu_state.select(Some(9));
         handle_key(&mut app, press(KeyCode::Enter));
         assert_eq!(app.screen, Screen::MainMenu);
+    }
+
+    #[test]
+    fn changing_screen_clears_stale_status() {
+        let mut app = App::new("adb".to_string(), None, Lang::English);
+        app.screen = Screen::Scripts;
+        app.status = i18n::tr("scripts.hint").to_string();
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::DeviceMenu);
+        assert!(app.status.is_empty());
+    }
+
+    #[test]
+    fn changing_screen_keeps_status_set_by_handler() {
+        let mut app = App::new("adb".to_string(), None, Lang::English);
+        app.serial = Some("serial".to_string());
+        app.screen = Screen::DeviceMenu;
+        app.device_menu_state.select(Some(1));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.screen, Screen::Scripts);
+        assert!(!app.status.is_empty());
     }
 }

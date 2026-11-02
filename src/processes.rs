@@ -57,37 +57,106 @@ pub fn list(adb: &str, serial: &str) -> Result<Vec<ProcessInfo>> {
     Ok(Vec::new())
 }
 
+#[allow(clippy::collapsible_if)]
 pub fn parse_ps(text: &str) -> Vec<ProcessInfo> {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let (header, data_lines): (Option<Vec<&str>>, &[&str]) =
+        if lines[0].split_whitespace().any(|t| t == "PID") {
+            (Some(lines[0].split_whitespace().collect()), &lines[1..])
+        } else {
+            (None, &lines[..])
+        };
+
     let mut result = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
+    for line in data_lines {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 4 {
             continue;
         }
-        let Ok(pid) = parts[1].parse::<u32>() else {
-            continue;
-        };
-        let Ok(ppid) = parts[2].parse::<u32>() else {
-            continue;
-        };
-        let name = if parts.len() == 4 {
-            parts[3].to_string()
-        } else if parts[3].parse::<u64>().is_ok() {
-            parts[parts.len() - 1].to_string()
-        } else {
-            parts[3..].join(" ")
-        };
-        result.push(ProcessInfo {
-            user: parts[0].to_string(),
-            pid,
-            ppid,
-            name,
-        });
+
+        // Try header-based parsing first.
+        let mut parsed: Option<ProcessInfo> = None;
+        if let Some(h) = &header {
+            let user_idx = h
+                .iter()
+                .position(|t| *t == "USER" || *t == "UID")
+                .unwrap_or(0);
+            let pid_idx = h.iter().position(|t| *t == "PID").unwrap_or(1);
+            let ppid_idx = h.iter().position(|t| *t == "PPID").unwrap_or(2);
+            let name_idx = h
+                .iter()
+                .position(|t| *t == "NAME" || *t == "CMD" || *t == "COMMAND" || *t == "ARGS")
+                .unwrap_or_else(|| h.len().saturating_sub(1));
+
+            if user_idx < parts.len()
+                && pid_idx < parts.len()
+                && ppid_idx < parts.len()
+                && name_idx < parts.len()
+            {
+                if let (Ok(pid), Ok(ppid)) = (
+                    parts[pid_idx].parse::<u32>(),
+                    parts[ppid_idx].parse::<u32>(),
+                ) {
+                    // If data has more columns than header, an extra state column
+                    // (e.g. "S") may precede NAME; skip it.
+                    let mut ni = name_idx;
+                    if parts.len() > h.len() && ni < parts.len() {
+                        let tok = parts[ni];
+                        if tok.len() == 1 && "SRZTDI".contains(tok) && ni + 1 < parts.len() {
+                            ni += 1;
+                        }
+                    }
+                    if ni < parts.len() {
+                        let name = parts[ni..].join(" ");
+                        if !name.is_empty() {
+                            parsed = Some(ProcessInfo {
+                                user: parts[user_idx].to_string(),
+                                pid,
+                                ppid,
+                                name,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if parsed.is_none() {
+            // Fallback heuristic for headerless or unexpected formats.
+            let Ok(pid) = parts[1].parse::<u32>() else {
+                continue;
+            };
+            let Ok(ppid) = parts[2].parse::<u32>() else {
+                continue;
+            };
+            let name = if parts.len() == 4 {
+                parts[3].to_string()
+            } else if parts[3].parse::<u64>().is_ok() {
+                parts[parts.len() - 1].to_string()
+            } else {
+                parts[3..].join(" ")
+            };
+            parsed = Some(ProcessInfo {
+                user: parts[0].to_string(),
+                pid,
+                ppid,
+                name,
+            });
+        }
+
+        if let Some(p) = parsed {
+            result.push(p);
+        }
     }
+
     result.sort_by_key(|process| process.pid);
     result
 }

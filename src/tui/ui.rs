@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
 };
@@ -13,18 +13,33 @@ use crate::theme::Theme;
 use crate::tui::app::{App, AppAction, AppView, NetworkAction, Screen};
 
 pub fn render(f: &mut Frame, app: &mut App) {
+    if app.last_screen != Some(app.screen) {
+        if app.last_screen == Some(Screen::AppList) && app.status == i18n::tr("apps.status.help") {
+            app.status.clear();
+        }
+        app.last_screen = Some(app.screen);
+    }
     let area = f.area();
+    // AppList gestiona su propio footer, por lo que no reservamos el área
+    // inferior de estado (evita la franja en blanco del tamaño del hint).
+    let status_reserved = !app.status.is_empty() && app.screen != Screen::AppList;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(if app.status.is_empty() {
-            vec![Constraint::Min(3)]
-        } else {
+        .constraints(if status_reserved {
             vec![Constraint::Min(3), Constraint::Length(3)]
+        } else {
+            vec![Constraint::Min(3)]
         })
         .split(area);
 
     match app.screen {
         Screen::DeviceSelect => render_device_select(f, app, chunks[0]),
+        Screen::DeviceDiscover | Screen::DiscoverDevices | Screen::DeviceDiscovery => {
+            render_device_discover(f, app, chunks[0])
+        }
+        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected => {
+            render_connected_devices(f, app, chunks[0])
+        }
         Screen::MainMenu => render_main_menu(f, app, chunks[0]),
         Screen::Scripts => render_scripts(f, app, chunks[0]),
         Screen::ScriptFolders => render_script_folders(f, app, chunks[0]),
@@ -49,10 +64,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Screen::StorageVolumes => render_storage_volumes(f, app, chunks[0]),
     }
 
-    if !app.status.is_empty() {
+    if status_reserved {
         let status = Paragraph::new(Line::from(app.status.clone()))
-            .style(Style::default().fg(ratatui::style::Color::Gray))
-            .block(Block::default().borders(Borders::TOP));
+            .style(Theme::muted())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Theme::border()),
+            );
         f.render_widget(status, chunks[1]);
     }
 }
@@ -79,7 +99,27 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         f.render_widget(para, area);
         return;
     }
-    let mut items: Vec<ListItem> = app
+    let items = vec![
+        ListItem::new(i18n::tr("device.connected.title")),
+        ListItem::new(i18n::tr("device.discover.title")),
+    ];
+    let mut state = app.device_state;
+    let list = List::new(items)
+        .block(menu_block(title))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.device_state = state;
+}
+
+fn render_connected_devices(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = i18n::tr("device.connected.title");
+    if app.loading {
+        let para = Paragraph::new(i18n::tr("device.select.loading")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    let items: Vec<ListItem> = app
         .devices
         .iter()
         .map(|d| {
@@ -94,15 +134,28 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
             ))
         })
         .collect();
-    items.push(ListItem::new(i18n::tr("device.select.discover")));
-    items.push(ListItem::new(i18n::tr("device.select.connect_ip")));
-    let mut state = app.device_state;
+    let mut state = app.connected_devices_state;
     let list = List::new(items)
-        .block(menu_block(title))
+        .block(menu_block(title.to_string()))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.device_state = state;
+    app.connected_devices_state = state;
+}
+
+fn render_device_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = i18n::tr("device.discover.title");
+    let items = vec![
+        ListItem::new(i18n::tr("device.discover.scan")),
+        ListItem::new(i18n::tr("device.select.connect_ip")),
+    ];
+    let mut state = app.device_discover_state;
+    let list = List::new(items)
+        .block(menu_block(title.to_string()))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.device_discover_state = state;
 }
 
 fn render_main_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -132,7 +185,7 @@ fn render_scripts(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = BUILTIN_SCRIPTS
         .iter()
         .map(|script| {
-            let label = if app.script_running && *script == EL_NEGRO_SAMUEL {
+            let label = if app.scripts.script_running && *script == EL_NEGRO_SAMUEL {
                 format!("{script} ({})", i18n::tr("scripts.running"))
             } else {
                 (*script).to_string()
@@ -140,13 +193,13 @@ fn render_scripts(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             ListItem::new(label)
         })
         .collect();
-    let mut state = app.scripts_menu_state;
+    let mut state = app.scripts.scripts_menu_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.scripts_menu_state = state;
+    app.scripts.scripts_menu_state = state;
 }
 
 fn render_script_folders(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -159,7 +212,7 @@ fn render_script_folders(f: &mut Frame, app: &mut App, area: ratatui::layout::Re
     let items: Vec<ListItem> = ScriptFolder::ALL
         .iter()
         .map(|folder| {
-            let mark = if app.script_selected.contains(folder) {
+            let mark = if app.scripts.script_selected.contains(folder) {
                 "[x]"
             } else {
                 "[ ]"
@@ -167,39 +220,46 @@ fn render_script_folders(f: &mut Frame, app: &mut App, area: ratatui::layout::Re
             ListItem::new(format!("{mark} {}", folder.label()))
         })
         .collect();
-    let mut state = app.script_folder_state;
+    let mut state = app.scripts.script_folder_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.script_folder_state = state;
+    app.scripts.script_folder_state = state;
 }
 
 fn render_logcat(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let serial = app.serial.as_deref().unwrap_or("-");
     let title = rust_i18n::t!("logcat.title", serial = serial).to_string();
     let items: Vec<ListItem> = app
+        .logcat
         .logcat_lines
         .iter()
         .map(|line| ListItem::new(line.clone()))
         .collect();
-    let mut state = app.logcat_state;
+    let mut state = app.logcat.logcat_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.logcat_state = state;
+    app.logcat.logcat_state = state;
 }
 
 fn render_processes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let serial = app.serial.as_deref().unwrap_or("-");
     let title = rust_i18n::t!("processes.title", serial = serial).to_string();
+    if app.processes.processes_loading {
+        let para = Paragraph::new(loading_indicator(&i18n::tr("processes.status.loading")))
+            .block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
     let block = menu_block(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
-    if let Some(process) = &app.process_pending {
+    if let Some(process) = &app.processes.process_pending {
         let text = rust_i18n::t!(
             "processes.confirm",
             pid = process.pid,
@@ -214,13 +274,13 @@ fn render_processes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let filtered_indices = app.filtered_process_indices();
     let filtered_len = filtered_indices.len();
     if filtered_len == 0 {
-        app.process_state.select(None);
-    } else if let Some(selected) = app.process_state.selected() {
+        app.processes.process_state.select(None);
+    } else if let Some(selected) = app.processes.process_state.selected() {
         if selected >= filtered_len {
-            app.process_state.select(Some(filtered_len - 1));
+            app.processes.process_state.select(Some(filtered_len - 1));
         }
     } else {
-        app.process_state.select(Some(0));
+        app.processes.process_state.select(Some(0));
     }
 
     let chunks = Layout::default()
@@ -231,28 +291,22 @@ fn render_processes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             Constraint::Min(0),
         ])
         .split(inner);
-    let filter_line = if app.process_filter.is_empty() {
+    let filter_line = if app.processes.process_filter.is_empty() {
         rust_i18n::t!("processes.status.loaded", count = filtered_len).to_string()
     } else {
-        format!("{} ({})", app.process_filter, filtered_len)
+        format!("{} ({})", app.processes.process_filter, filtered_len)
     };
-    f.render_widget(
-        Paragraph::new(filter_line).style(Style::default().fg(Color::Gray)),
-        chunks[0],
-    );
+    f.render_widget(Paragraph::new(filter_line).style(Theme::muted()), chunks[0]);
     let header = format!(
         "{:<8} {:<16} {}",
         i18n::tr("processes.header.pid"),
         i18n::tr("processes.header.user"),
         i18n::tr("processes.header.name")
     );
-    f.render_widget(
-        Paragraph::new(header).style(Style::default().fg(Color::Gray)),
-        chunks[1],
-    );
+    f.render_widget(Paragraph::new(header).style(Theme::muted()), chunks[1]);
     let items: Vec<ListItem> = filtered_indices
         .iter()
-        .filter_map(|index| app.processes.get(*index))
+        .filter_map(|index| app.processes.processes.get(*index))
         .map(|process| {
             ListItem::new(format!(
                 "{:<8} {:<16} {}",
@@ -260,12 +314,12 @@ fn render_processes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             ))
         })
         .collect();
-    let mut state = app.process_state;
+    let mut state = app.processes.process_state;
     let list = List::new(items)
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, chunks[2], &mut state);
-    app.process_state = state;
+    app.processes.process_state = state;
 }
 
 fn render_device_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -288,9 +342,9 @@ fn render_output_path(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect)
     let visible_path = tail_chars(&app.output_path_input, max_path_width);
 
     let input = Line::from(vec![
-        Span::styled("> ", Style::default().fg(Color::Cyan)),
+        Span::styled("> ", Theme::accent()),
         Span::styled(visible_path, Theme::normal()),
-        Span::styled("_", Style::default().fg(Color::Cyan)),
+        Span::styled("_", Theme::accent()),
     ]);
 
     let lines = vec![
@@ -299,7 +353,7 @@ fn render_output_path(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect)
         Line::from(""),
         Line::from(Span::styled(
             i18n::tr("settings.output_path.hint"),
-            Style::default().fg(Color::Gray),
+            Theme::muted(),
         )),
     ];
     let para = Paragraph::new(lines).block(block);
@@ -342,14 +396,14 @@ fn render_language(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn render_apps_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let items = list_items(&app.apps_menu_keys);
-    let mut state = app.apps_menu_state;
+    let items = list_items(&app.apps.apps_menu_keys);
+    let mut state = app.apps.apps_menu_state;
     let list = List::new(items)
         .block(menu_block(i18n::tr("apps.menu.title")))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.apps_menu_state = state;
+    app.apps.apps_menu_state = state;
 }
 
 fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -358,7 +412,7 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         filtered
             .iter()
             .map(|p| {
-                let mark = if app.selected.contains(p) {
+                let mark = if app.apps.selected.contains(p) {
                     "[x]"
                 } else {
                     "[ ]"
@@ -374,11 +428,11 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                     crate::safety::AppKind::User => String::new(),
                 };
                 let style = match kind {
-                    crate::safety::AppKind::Critical => Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(ratatui::style::Modifier::BOLD),
-                    crate::safety::AppKind::System => Style::default().fg(Color::Yellow),
-                    crate::safety::AppKind::DeviceAdmin => Style::default().fg(Color::Magenta),
+                    crate::safety::AppKind::Critical => {
+                        Theme::danger().add_modifier(ratatui::style::Modifier::BOLD)
+                    }
+                    crate::safety::AppKind::System => Theme::warning(),
+                    crate::safety::AppKind::DeviceAdmin => Theme::admin(),
                     crate::safety::AppKind::User => Style::default(),
                 };
                 let label = if badge.is_empty() {
@@ -391,94 +445,123 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             .collect()
     };
 
-    let view_name = match app.app_view {
+    let view_name = match app.apps.app_view {
         AppView::Installed => i18n::tr("apps.view.installed"),
         AppView::Available => i18n::tr("apps.view.available"),
     };
-    let action_name = match app.app_action {
+    let action_name = match app.apps.app_action {
         AppAction::Uninstall => i18n::tr("apps.action.uninstall"),
         AppAction::Reinstall => i18n::tr("apps.action.reinstall"),
         AppAction::Enable => i18n::tr("apps.action.enable"),
         AppAction::ClearCache => i18n::tr("storage.cache.title"),
+        AppAction::ForceStop => i18n::tr("apps.action.force_stop"),
+        AppAction::ClearData => i18n::tr("apps.action.clear_data"),
     };
     // Uninstall view shows all installed packages (system apps included, marked).
     let uninstall_all =
-        app.app_action == AppAction::Uninstall && app.app_view == AppView::Installed;
+        app.apps.app_action == AppAction::Uninstall && app.apps.app_view == AppView::Installed;
     let core = if uninstall_all {
         i18n::tr("apps.core.uninstall_all")
     } else {
         format!("{action_name} - {view_name}")
     };
-    let mut title = if app.force_mode {
-        if app.filter.is_empty() && !app.filter_mode {
+    let title = if app.apps.force_mode {
+        if app.apps.filter.is_empty() && !app.apps.filter_mode {
             rust_i18n::t!("apps.title.force", core = core).to_string()
         } else {
-            let filter = if app.filter_mode {
-                format!("{}_", app.filter)
+            let filter = if app.apps.filter_mode {
+                format!("{}_", app.apps.filter)
             } else {
-                app.filter.clone()
+                app.apps.filter.clone()
             };
             rust_i18n::t!("apps.title.force_filter", core = core, filter = filter).to_string()
         }
-    } else if app.filter.is_empty() && !app.filter_mode {
+    } else if app.apps.filter.is_empty() && !app.apps.filter_mode {
         rust_i18n::t!("apps.title.normal", core = core).to_string()
     } else {
-        let filter = if app.filter_mode {
-            format!("{}_", app.filter)
+        let filter = if app.apps.filter_mode {
+            format!("{}_", app.apps.filter)
         } else {
-            app.filter.clone()
+            app.apps.filter.clone()
         };
         rust_i18n::t!("apps.title.filter", core = core, filter = filter).to_string()
     };
-    title = rust_i18n::t!(
-        "apps.title.sort",
-        title = title,
-        mode = app.sort_mode.label()
-    )
-    .to_string();
 
-    let mut state = app.app_state;
+    if !app.apps.app_cache_loaded {
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+
+    let hints_text = if app.status.is_empty() {
+        format!(
+            "Sort: {} | Space select | Enter run | Tab sort | / filter | Esc back",
+            app.apps.sort_mode.label()
+        )
+    } else {
+        app.status.clone()
+    };
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let inner_width = if inner_width == 0 { 1 } else { inner_width };
+    let wrapped_lines = hints_text.len().div_ceil(inner_width);
+    let wrapped_lines = wrapped_lines.clamp(1, 4);
+    let footer_height = (wrapped_lines + 2) as u16;
+
+    let mut state = app.apps.app_state;
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(footer_height)])
+        .split(area);
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
-    f.render_stateful_widget(list, area, &mut state);
-    app.app_state = state;
+    f.render_stateful_widget(list, chunks[0], &mut state);
+    app.apps.app_state = state;
+
+    let footer = Paragraph::new(hints_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title("Info")
+                .border_style(Theme::border()),
+        )
+        .wrap(Wrap { trim: false });
+    f.render_widget(footer, chunks[1]);
 }
 
 fn render_install_apk(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let block = menu_block(i18n::tr("apps.install.title"));
     let inner_width = block.inner(area).width as usize;
     let max_path_width = inner_width.saturating_sub(3);
-    let visible_path = tail_chars(&app.apk_input, max_path_width);
+    let visible_path = tail_chars(&app.apps.apk_input, max_path_width);
 
     let input = Line::from(vec![
-        Span::styled("> ", Style::default().fg(Color::Cyan)),
+        Span::styled("> ", Theme::accent()),
         Span::styled(visible_path, Theme::normal()),
-        Span::styled("_", Style::default().fg(Color::Cyan)),
+        Span::styled("_", Theme::accent()),
     ]);
 
     let mut lines = vec![
         Line::from(i18n::tr("apps.install.path_label")),
         input,
         Line::from(""),
-        Line::from(Span::styled(
-            i18n::tr("apps.install.hint"),
-            Style::default().fg(Color::Gray),
-        )),
+        Line::from(Span::styled(i18n::tr("apps.install.hint"), Theme::muted())),
     ];
 
-    if let Some(result) = &app.apk_result {
+    if let Some(result) = &app.apps.apk_result {
         let result_style = if result.is_error {
-            Style::default().fg(Color::Red)
+            Theme::danger()
         } else {
-            Style::default().fg(Color::Green)
+            Theme::success()
         };
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(result.text.clone(), result_style)));
         lines.push(Line::from(Span::styled(
             i18n::tr("apps.install.dismiss_hint"),
-            Style::default().fg(Color::Gray),
+            Theme::muted(),
         )));
     }
 
@@ -486,6 +569,16 @@ fn render_install_apk(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect)
         .block(block)
         .wrap(Wrap { trim: false });
     f.render_widget(para, area);
+}
+
+fn loading_indicator(base: &str) -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let dots = ((millis / 400) % 4) as usize;
+    let base = base.trim_end_matches('.');
+    format!("{}{}", base, ".".repeat(dots + 1))
 }
 
 fn tail_chars(value: &str, max_chars: usize) -> String {
@@ -503,16 +596,17 @@ fn tail_chars(value: &str, max_chars: usize) -> String {
 
 fn render_confirm(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let has_critical = app
+        .apps
         .selected
         .iter()
         .any(|p| matches!(app.kind(p), crate::safety::AppKind::Critical));
-    let text = if has_critical && !app.force_mode {
-        rust_i18n::t!("confirm.critical", count = app.selected.len()).to_string()
+    let text = if has_critical && !app.apps.force_mode {
+        rust_i18n::t!("confirm.critical", count = app.apps.selected.len()).to_string()
     } else {
-        rust_i18n::t!("confirm.uninstall", count = app.selected.len()).to_string()
+        rust_i18n::t!("confirm.uninstall", count = app.apps.selected.len()).to_string()
     };
-    let para_style = if has_critical && !app.force_mode {
-        Style::default().fg(Color::Red)
+    let para_style = if has_critical && !app.apps.force_mode {
+        Theme::danger()
     } else {
         Theme::normal()
     };
@@ -524,14 +618,15 @@ fn render_confirm(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
 fn render_device_info(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let title = i18n::tr("info.title");
-    if app.device_info_loading {
-        let para = Paragraph::new(i18n::tr("info.loading")).block(menu_block(title));
+    if app.device_info.device_info_loading {
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("info.loading"))).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
-    let para = Paragraph::new(app.device_info_lines.clone())
+    let para = Paragraph::new(app.device_info.device_info_lines.clone())
         .block(menu_block(title))
-        .scroll((app.device_info_scroll, 0))
+        .scroll((app.device_info.device_info_scroll, 0))
         .wrap(Wrap { trim: true });
     f.render_widget(para, area);
 }
@@ -561,10 +656,11 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
     // Info area
     let mut lines: Vec<Line> = Vec::new();
-    if app.network_loading {
+    if app.network.network_loading {
         lines.push(Line::from(i18n::tr("info.loading")));
     } else {
         let ip = app
+            .network
             .network_ip
             .clone()
             .unwrap_or_else(|| i18n::tr("network.status.no_ip"));
@@ -576,14 +672,15 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         lines.push(Line::from(format!(
             "{}: {}",
             i18n::tr("network.label.ssid"),
-            app.network_ssid
+            app.network.network_ssid
         )));
         lines.push(Line::from(format!(
             "{}: {}",
             i18n::tr("network.label.wifi"),
-            app.network_wifi_state
+            app.network.network_wifi_state
         )));
         let endpoint = app
+            .network
             .network_endpoint
             .clone()
             .unwrap_or_else(|| "-".to_string());
@@ -598,11 +695,11 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             i18n::tr("network.label.subnet"),
             subnet
         )));
-        if let Some(result) = &app.network_result {
+        if let Some(result) = &app.network.network_result {
             let style = if result.is_error {
-                Style::default().fg(Color::Red)
+                Theme::danger()
             } else {
-                Style::default().fg(Color::Green)
+                Theme::success()
             };
             lines.push(Line::from(Span::styled(result.text.clone(), style)));
         }
@@ -611,38 +708,35 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     f.render_widget(info, chunks[0]);
 
     // Content area
-    if app.wifi_subnet_input_mode {
+    if app.network.wifi_subnet_input_mode {
         let input_lines = vec![
             Line::from(i18n::tr("network.subnet.label")),
             Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::Cyan)),
-                Span::styled(app.wifi_subnet_input.clone(), Theme::normal()),
-                Span::styled("_", Style::default().fg(Color::Cyan)),
+                Span::styled("> ", Theme::accent()),
+                Span::styled(app.network.wifi_subnet_input.clone(), Theme::normal()),
+                Span::styled("_", Theme::accent()),
             ]),
             Line::from(Span::styled(
                 i18n::tr("network.subnet.hint"),
-                Style::default().fg(Color::Gray),
+                Theme::muted(),
             )),
         ];
         let para = Paragraph::new(input_lines).block(menu_block(i18n::tr("network.title")));
         f.render_widget(para, chunks[1]);
-    } else if app.network_input_mode {
+    } else if app.network.network_input_mode {
         let input_lines = vec![
             Line::from(i18n::tr("network.input.label")),
             Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::Cyan)),
-                Span::styled(app.network_input.clone(), Theme::normal()),
-                Span::styled("_", Style::default().fg(Color::Cyan)),
+                Span::styled("> ", Theme::accent()),
+                Span::styled(app.network.network_input.clone(), Theme::normal()),
+                Span::styled("_", Theme::accent()),
             ]),
-            Line::from(Span::styled(
-                i18n::tr("network.input.hint"),
-                Style::default().fg(Color::Gray),
-            )),
+            Line::from(Span::styled(i18n::tr("network.input.hint"), Theme::muted())),
         ];
         let para = Paragraph::new(input_lines).block(menu_block(i18n::tr("network.title")));
         f.render_widget(para, chunks[1]);
-    } else if app.network_pending.is_some() {
-        let text = match app.network_pending {
+    } else if app.network.network_pending.is_some() {
+        let text = match app.network.network_pending {
             Some(NetworkAction::Enable) => i18n::tr("network.confirm.enable"),
             Some(NetworkAction::Connect) => i18n::tr("network.confirm.connect"),
             Some(NetworkAction::Disconnect) => i18n::tr("network.confirm.disconnect"),
@@ -652,33 +746,33 @@ fn render_network(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         let para = Paragraph::new(text).block(menu_block(i18n::tr("network.title")));
         f.render_widget(para, chunks[1]);
     } else {
-        let items = list_items(&app.network_menu_keys);
-        let mut state = app.network_menu_state;
+        let items = list_items(&app.network.network_menu_keys);
+        let mut state = app.network.network_menu_state;
         let list = List::new(items)
             .block(menu_block(i18n::tr("network.title")))
             .highlight_style(Theme::selected())
             .highlight_symbol(">> ");
         f.render_stateful_widget(list, chunks[1], &mut state);
-        app.network_menu_state = state;
+        app.network.network_menu_state = state;
     }
 }
 
 fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let mut title = i18n::tr("wifi.discover.title").to_string();
-    if !app.wifi_scanning
-        && let Some(at) = app.wifi_scan_last_at
+    if !app.network.wifi_scanning
+        && let Some(at) = app.network.wifi_scan_last_at
     {
         title = format!("{} (last scan {}s ago)", title, at.elapsed().as_secs());
     }
-    if app.wifi_scanning {
+    if app.network.wifi_scanning {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let frame = if let Some(start) = app.wifi_scan_start {
+        let frame = if let Some(start) = app.network.wifi_scan_start {
             let elapsed = start.elapsed().as_millis();
             frames[(elapsed / 100) as usize % frames.len()]
         } else {
             frames[0]
         };
-        let progress = app.wifi_scan_progress;
+        let progress = app.network.wifi_scan_progress;
         let total = 254;
         let text = format!(
             "{} {} {}/{}",
@@ -691,7 +785,7 @@ fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         f.render_widget(para, area);
         return;
     }
-    if app.wifi_discovered.is_empty() && app.wifi_rejected.is_empty() {
+    if app.network.wifi_discovered.is_empty() && app.network.wifi_rejected.is_empty() {
         let text = format!(
             "{}\n{}",
             i18n::tr("wifi.discover.empty"),
@@ -703,59 +797,56 @@ fn render_wifi_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
     }
 
     let mut items: Vec<ListItem> = Vec::new();
-    for e in &app.wifi_discovered {
-        items.push(ListItem::new(format!("✓ {}", e)).style(Style::default().fg(Color::Green)));
+    for e in &app.network.wifi_discovered {
+        items.push(ListItem::new(format!("✓ {}", e)).style(Theme::success()));
     }
-    if app.wifi_show_rejected {
-        for e in &app.wifi_rejected {
-            items.push(ListItem::new(format!("✗ {}", e)).style(Style::default().fg(Color::Red)));
+    if app.network.wifi_show_rejected {
+        for e in &app.network.wifi_rejected {
+            items.push(ListItem::new(format!("✗ {}", e)).style(Theme::danger()));
         }
-    } else if !app.wifi_rejected.is_empty() {
+    } else if !app.network.wifi_rejected.is_empty() {
         items.push(
             ListItem::new(format!(
                 "… {} rejected (press 'a' to show)",
-                app.wifi_rejected.len()
+                app.network.wifi_rejected.len()
             ))
-            .style(Style::default().fg(Color::DarkGray)),
+            .style(Theme::dark_muted()),
         );
     }
 
-    let mut state = app.wifi_discover_state;
+    let mut state = app.network.wifi_discover_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.wifi_discover_state = state;
+    app.network.wifi_discover_state = state;
 }
 
 fn render_wifi_connect(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let block = menu_block(i18n::tr("wifi.connect.title"));
     let inner_width = block.inner(area).width as usize;
     let max_width = inner_width.saturating_sub(3);
-    let visible = tail_chars(&app.wifi_connect_input, max_width);
+    let visible = tail_chars(&app.network.wifi_connect_input, max_width);
 
     let input = Line::from(vec![
-        Span::styled("> ", Style::default().fg(Color::Cyan)),
+        Span::styled("> ", Theme::accent()),
         Span::styled(visible, Theme::normal()),
-        Span::styled("_", Style::default().fg(Color::Cyan)),
+        Span::styled("_", Theme::accent()),
     ]);
 
     let mut lines = vec![
         Line::from(i18n::tr("wifi.connect.label")),
         input,
         Line::from(""),
-        Line::from(Span::styled(
-            i18n::tr("wifi.connect.hint"),
-            Style::default().fg(Color::Gray),
-        )),
+        Line::from(Span::styled(i18n::tr("wifi.connect.hint"), Theme::muted())),
     ];
 
-    if let Some(result) = &app.wifi_connect_result {
+    if let Some(result) = &app.network.wifi_connect_result {
         let style = if result.is_error {
-            Style::default().fg(Color::Red)
+            Theme::danger()
         } else {
-            Style::default().fg(Color::Green)
+            Theme::success()
         };
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(result.text.clone(), style)));
@@ -768,20 +859,21 @@ fn render_wifi_connect(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 }
 
 fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let title = format!("Files: {}", app.file_browser_path);
-    if app.file_browser_loading {
-        let para = Paragraph::new(i18n::tr("files.loading")).block(menu_block(title));
+    let title = format!("Files: {}", app.storage.file_browser_path);
+    if app.storage.file_browser_loading {
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
-    if app.file_browser_entries.is_empty() {
+    if app.storage.file_browser_entries.is_empty() {
         let para = Paragraph::new(i18n::tr("files.empty")).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
-    let filter = app.file_browser_filter.to_lowercase();
+    let filter = app.storage.file_browser_filter.to_lowercase();
     let mut items: Vec<ListItem> = Vec::new();
-    for e in &app.file_browser_entries {
+    for e in &app.storage.file_browser_entries {
         if !filter.is_empty() && !e.name.to_lowercase().contains(&filter) {
             continue;
         }
@@ -795,40 +887,46 @@ fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
     }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .constraints([Constraint::Min(3), Constraint::Length(3)])
         .split(area);
-    let mut state = app.file_browser_state;
+    let mut state = app.storage.file_browser_state;
     let list = List::new(items)
         .block(menu_block(title))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, chunks[0], &mut state);
-    app.file_browser_state = state;
+    app.storage.file_browser_state = state;
     let help = "↑↓ navegar  ← subir  → entrar  d descargar  c copiar  m mover  v pegar  x borrar  r refrescar  / filtrar  Esc salir";
     let para = Paragraph::new(help).block(menu_block("Help".to_string()));
     f.render_widget(para, chunks[1]);
 }
 
 fn render_storage_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let items = list_items(&app.storage_menu_keys);
-    let mut state = app.storage_menu_state;
+    let items = list_items(&app.storage.storage_menu_keys);
+    let mut state = app.storage.storage_menu_state;
     let list = List::new(items)
         .block(menu_block(i18n::tr("storage.title")))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.storage_menu_state = state;
+    app.storage.storage_menu_state = state;
 }
 
 fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    if app.storage_usage.is_empty() {
+    if app.storage.storage_usage_loading {
+        let para = Paragraph::new(loading_indicator(&i18n::tr("storage.usage.loading")))
+            .block(menu_block(i18n::tr("storage.usage.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    if app.storage.storage_usage.is_empty() {
         let para = Paragraph::new(i18n::tr("storage.usage.empty"))
             .block(menu_block(i18n::tr("storage.usage.title")));
         f.render_widget(para, area);
         return;
     }
     let mut items: Vec<ListItem> = Vec::new();
-    for (path, size) in &app.storage_usage {
+    for (path, size) in &app.storage.storage_usage {
         let mb = *size as f64 / 1_048_576.0;
         items.push(ListItem::new(format!("{}  {:.1} MB", path, mb)));
     }
@@ -837,13 +935,20 @@ fn render_storage_usage(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
 }
 
 fn render_storage_volumes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    if app.storage_volumes.is_empty() {
+    if app.storage.storage_volumes_loading {
+        let para = Paragraph::new(loading_indicator(&i18n::tr("storage.volumes.loading")))
+            .block(menu_block(i18n::tr("storage.volumes.title")));
+        f.render_widget(para, area);
+        return;
+    }
+    if app.storage.storage_volumes.is_empty() {
         let para = Paragraph::new(i18n::tr("storage.volumes.empty"))
             .block(menu_block(i18n::tr("storage.volumes.title")));
         f.render_widget(para, area);
         return;
     }
     let items: Vec<ListItem> = app
+        .storage
         .storage_volumes
         .iter()
         .map(|v| ListItem::new(v.clone()))

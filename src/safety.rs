@@ -21,16 +21,7 @@ const CRITICAL_PREFIXES: &[&str] = &[
     "com.google.android.gsf",
 ];
 
-const CRITICAL_EXACT: &[&str] = &[
-    "com.android.systemui",
-    "com.android.settings",
-    "com.android.phone",
-];
-
 pub fn is_critical(pkg: &str) -> bool {
-    if CRITICAL_EXACT.contains(&pkg) {
-        return true;
-    }
     CRITICAL_PREFIXES.iter().any(|p| pkg.starts_with(p))
 }
 

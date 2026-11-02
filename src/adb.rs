@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
@@ -66,23 +68,55 @@ pub fn device_brand_model(adb: &str, serial: &str) -> (String, String) {
     (manufacturer, model)
 }
 
+fn output_with_timeout(mut command: Command, timeout: Duration) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let mut stderr = child.stderr.take()?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out_buf = Vec::new();
+    let mut err_buf = Vec::new();
+    let _ = stdout.read_to_end(&mut out_buf);
+    let _ = stderr.read_to_end(&mut err_buf);
+    Some(std::process::Output {
+        status: child
+            .wait()
+            .unwrap_or_else(|_| std::process::ExitStatus::default()),
+        stdout: out_buf,
+        stderr: err_buf,
+    })
+}
+
 fn prop_value(adb: &str, serial: &str, key: &str) -> String {
     if crate::validate::serial(serial).is_err() {
         return String::new();
     }
-    let adb = adb.to_string();
-    let serial = serial.to_string();
-    let key = key.to_string();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let out = Command::new(&adb)
-            .args(["-s", &serial, "shell", "getprop", &key])
-            .output();
-        let _ = tx.send(out);
-    });
-    match rx.recv_timeout(std::time::Duration::from_millis(2000)) {
-        Ok(Ok(out)) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        _ => String::new(),
+    let mut cmd = Command::new(adb);
+    cmd.args(["-s", serial, "shell", "getprop", key]);
+    match output_with_timeout(cmd, Duration::from_millis(2000)) {
+        Some(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        None => String::new(),
     }
 }
 
@@ -237,19 +271,11 @@ pub fn power_off(adb: &str, serial: &str) -> Result<()> {
 
 pub fn getprop(adb: &str, serial: &str) -> Result<String> {
     crate::validate::serial(serial)?;
-    let adb = adb.to_string();
-    let serial = serial.to_string();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let out = Command::new(&adb)
-            .args(["-s", &serial, "shell", "getprop"])
-            .output();
-        let _ = tx.send(out);
-    });
-    match rx.recv_timeout(std::time::Duration::from_millis(4000)) {
-        Ok(Ok(out)) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
-        Ok(Err(e)) => Err(e.into()),
-        Err(_) => Ok(String::new()),
+    let mut cmd = Command::new(adb);
+    cmd.args(["-s", serial, "shell", "getprop"]);
+    match output_with_timeout(cmd, Duration::from_millis(4000)) {
+        Some(out) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        None => Ok(String::new()),
     }
 }
 
@@ -455,18 +481,35 @@ pub struct NetworkInfo {
     pub ip: Option<String>,
     pub ssid: String,
     pub wifi_state: String,
+    pub wifi_enabled: bool,
+    pub mobile_data_enabled: bool,
+    pub airplane_mode: bool,
 }
 
+#[allow(unused_assignments, unused_mut)]
 pub fn network_info(adb: &str, serial: &str) -> Result<NetworkInfo> {
     crate::validate::serial(serial)?;
-    let mut ip: Option<String> = None;
 
-    if let Ok(out) = Command::new(adb)
-        .args(["-s", serial, "shell", "ip", "route", "get", "1.1.1.1"])
-        .output()
-    {
-        let text = String::from_utf8_lossy(&out.stdout);
-        let words: Vec<&str> = text.split_whitespace().collect();
+    let mut cmd = Command::new(adb);
+    cmd.args([
+        "-s",
+        serial,
+        "shell",
+        "sh",
+        "-c",
+        "ip route get 1.1.1.1; echo '---WIFI---'; dumpsys wifi; echo '---SETTINGS---'; settings get global mobile_data; settings get global airplane_mode_on",
+    ]);
+    let out = output_with_timeout(cmd, Duration::from_millis(5000));
+    let combined = out
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut ip: Option<String> = None;
+    let mut wifi_out = String::new();
+    let mut settings_out = String::new();
+
+    if let Some((before_wifi, rest)) = combined.split_once("---WIFI---") {
+        let words: Vec<&str> = before_wifi.split_whitespace().collect();
         for i in 0..words.len() {
             if words[i] == "src" && i + 1 < words.len() {
                 let candidate = words[i + 1];
@@ -476,58 +519,35 @@ pub fn network_info(adb: &str, serial: &str) -> Result<NetworkInfo> {
                 }
             }
         }
+        if let Some((wifi_text, settings_text)) = rest.split_once("---SETTINGS---") {
+            wifi_out = wifi_text.to_string();
+            settings_out = settings_text.to_string();
+        } else {
+            wifi_out = rest.to_string();
+        }
+    } else {
+        wifi_out = combined.clone();
     }
 
-    if ip.is_none()
-        && let Ok(out) = Command::new(adb)
-            .args(["-s", serial, "shell", "ip", "-4", "addr", "show"])
-            .output()
-    {
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            let line = line.trim();
-            if let Some(pos) = line.find("inet ") {
-                let rest = &line[pos + 5..];
-                let addr = rest.split_whitespace().next().unwrap_or("");
-                let addr = addr.split('/').next().unwrap_or(addr);
-                if !addr.is_empty() && addr != "127.0.0.1" {
-                    ip = Some(addr.to_string());
-                    break;
+    if ip.is_none() {
+        let mut cmd2 = Command::new(adb);
+        cmd2.args(["-s", serial, "shell", "ip", "-4", "addr", "show"]);
+        if let Some(o) = output_with_timeout(cmd2, Duration::from_millis(1500)) {
+            let text = String::from_utf8_lossy(&o.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some(pos) = line.find("inet ") {
+                    let rest = &line[pos + 5..];
+                    let addr = rest.split_whitespace().next().unwrap_or("");
+                    let addr = addr.split('/').next().unwrap_or(addr);
+                    if !addr.is_empty() && addr != "127.0.0.1" {
+                        ip = Some(addr.to_string());
+                        break;
+                    }
                 }
             }
         }
     }
-
-    if ip.is_none()
-        && let Ok(out) = Command::new(adb)
-            .args(["-s", serial, "shell", "ifconfig"])
-            .output()
-    {
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            if let Some(pos) = line.find("inet ") {
-                let rest = &line[pos + 5..];
-                let addr = if let Some(stripped) = rest.strip_prefix("addr:") {
-                    stripped
-                } else {
-                    rest
-                };
-                let addr = addr.split_whitespace().next().unwrap_or("");
-                let addr = addr.split(':').next_back().unwrap_or(addr);
-                let addr = addr.split('/').next().unwrap_or(addr);
-                if !addr.is_empty() && addr != "127.0.0.1" {
-                    ip = Some(addr.to_string());
-                    break;
-                }
-            }
-        }
-    }
-
-    let wifi_out = Command::new(adb)
-        .args(["-s", serial, "shell", "dumpsys", "wifi"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
 
     let lower = wifi_out.to_lowercase();
     let mut wifi_state = "unknown".to_string();
@@ -573,10 +593,119 @@ pub fn network_info(adb: &str, serial: &str) -> Result<NetworkInfo> {
         ssid = crate::i18n::tr("network.status.not_available");
     }
 
+    let mut settings_lines: Vec<&str> = settings_out.lines().collect();
+    let mobile_raw = settings_lines.first().map(|s| s.trim()).unwrap_or("");
+    let airplane_raw = settings_lines.get(1).map(|s| s.trim()).unwrap_or("");
+    let mobile_data_enabled = mobile_raw == "1";
+    let airplane_mode = airplane_raw == "1";
+    let wifi_enabled = wifi_state == "enabled";
+
     Ok(NetworkInfo {
         ip,
         ssid,
         wifi_state,
+        wifi_enabled,
+        mobile_data_enabled,
+        airplane_mode,
+    })
+}
+
+pub fn set_wifi_enabled(adb: &str, serial: &str, enabled: bool) -> Result<String> {
+    crate::validate::serial(serial)?;
+    let state = if enabled { "enable" } else { "disable" };
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "svc", "wifi", state])
+        .output()
+        .with_context(|| format!("failed 'svc wifi {state}'"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        bail!(
+            "{}",
+            if stderr.is_empty() {
+                format!("svc wifi {state} failed")
+            } else {
+                stderr
+            }
+        );
+    }
+    Ok(if enabled {
+        "wifi enabled".to_string()
+    } else {
+        "wifi disabled".to_string()
+    })
+}
+
+pub fn set_mobile_data_enabled(adb: &str, serial: &str, enabled: bool) -> Result<String> {
+    crate::validate::serial(serial)?;
+    let state = if enabled { "enable" } else { "disable" };
+    let out = Command::new(adb)
+        .args(["-s", serial, "shell", "svc", "data", state])
+        .output()
+        .with_context(|| format!("failed 'svc data {state}'"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        bail!(
+            "{}",
+            if stderr.is_empty() {
+                format!("svc data {state} failed")
+            } else {
+                stderr
+            }
+        );
+    }
+    Ok(if enabled {
+        "mobile data enabled".to_string()
+    } else {
+        "mobile data disabled".to_string()
+    })
+}
+
+pub fn set_airplane_mode(adb: &str, serial: &str, enabled: bool) -> Result<String> {
+    crate::validate::serial(serial)?;
+    let value = if enabled { "1" } else { "0" };
+    let broadcast_state = if enabled { "true" } else { "false" };
+    let out = Command::new(adb)
+        .args([
+            "-s",
+            serial,
+            "shell",
+            "settings",
+            "put",
+            "global",
+            "airplane_mode_on",
+            value,
+        ])
+        .output()
+        .with_context(|| "failed 'settings put airplane_mode_on'".to_string())?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        bail!(
+            "{}",
+            if stderr.is_empty() {
+                "settings put failed".to_string()
+            } else {
+                stderr
+            }
+        );
+    }
+    let _ = Command::new(adb)
+        .args([
+            "-s",
+            serial,
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "android.intent.action.AIRPLANE_MODE",
+            "--ez",
+            "state",
+            broadcast_state,
+        ])
+        .output();
+    Ok(if enabled {
+        "airplane mode enabled".to_string()
+    } else {
+        "airplane mode disabled".to_string()
     })
 }
 
@@ -716,6 +845,9 @@ pub fn wifi_adb_endpoints(adb: &str) -> Result<Vec<String>> {
 
 pub fn normalize_network_endpoint(input: &str) -> String {
     let input = input.trim();
+    if input.is_empty() {
+        return String::new();
+    }
     if input.contains(':') {
         input.to_string()
     } else {
@@ -803,39 +935,7 @@ pub fn mdns_services(adb: &str) -> Result<Vec<String>> {
 }
 
 pub fn wifi_connect(adb: &str, endpoint: &str) -> Result<String> {
-    let out = Command::new(adb)
-        .args(["connect", endpoint])
-        .output()
-        .with_context(|| "failed 'adb connect'".to_string())?;
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    let combined = format!("{stdout}{stderr}").trim().to_string();
-    let lower = combined.to_lowercase();
-    if lower.contains("connected to") || lower.contains("already connected") {
-        return Ok(if combined.is_empty() {
-            "connected".to_string()
-        } else {
-            combined
-        });
-    }
-    if !out.status.success() {
-        bail!(
-            "{}",
-            if combined.is_empty() {
-                "adb connect failed".to_string()
-            } else {
-                combined
-            }
-        );
-    }
-    bail!(
-        "{}",
-        if combined.is_empty() {
-            "adb connect failed".to_string()
-        } else {
-            combined
-        }
-    );
+    wifi_adb_connect(adb, endpoint)
 }
 
 /// Entrada de resultado de un escaneo Wi-Fi.
@@ -863,42 +963,46 @@ pub fn connect_succeeded(text: &str) -> bool {
     lower.contains("connected")
 }
 
-/// Intenta `adb connect <endpoint>` con un tiempo de espera corto.
-/// Devuelve `Ok(true)` si el dispositivo se conectó, `Ok(false)` si fue rechazado
-/// (incluyendo timeout), y `Err` si no se pudo ejecutar adb.
-fn adb_connect_with_timeout(adb: &str, endpoint: &str, timeout_ms: u64) -> Result<bool> {
-    let adb = adb.to_string();
-    let endpoint = endpoint.to_string();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
-        let output = std::process::Command::new(&adb)
-            .args(["connect", &endpoint])
-            .output();
-        let _ = sender.send(output);
-    });
+/// Clasifica la salida de `adb connect`.
+/// - `Some(true)` si se conectó.
+/// - `Some(false)` si fue rechazado activamente (p. ej. connection refused).
+/// - `None` si no hubo respuesta útil (timeout, sin ruta, etc.) y no debe mostrarse.
+pub fn classify_connect_output(text: &str) -> Option<bool> {
+    let lower = text.to_lowercase();
+    if lower.trim().is_empty()
+        || lower.contains("timed out")
+        || lower.contains("no route")
+        || lower.contains("cannot")
+        || lower.contains("unable")
+    {
+        return None;
+    }
+    if connect_succeeded(text) {
+        return Some(true);
+    }
+    if lower.contains("refused") || lower.contains("failed") || lower.contains("error") {
+        return Some(false);
+    }
+    None
+}
 
-    match receiver.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-        Ok(Ok(output)) => {
+/// Intenta `adb connect <endpoint>` con un tiempo de espera corto.
+/// Devuelve `Ok(Some(true))` si se conectó, `Ok(Some(false))` si fue rechazado
+/// activamente, `Ok(None)` si no hubo respuesta útil (no se muestra), y `Err`
+/// si no se pudo ejecutar adb.
+fn adb_connect_with_timeout(adb: &str, endpoint: &str, timeout_ms: u64) -> Result<Option<bool>> {
+    let mut cmd = Command::new(adb);
+    cmd.args(["connect", endpoint]);
+    match output_with_timeout(cmd, Duration::from_millis(timeout_ms)) {
+        Some(output) => {
             let combined = format!(
                 "{}{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            let _ = handle.join();
-            Ok(connect_succeeded(&combined))
+            Ok(classify_connect_output(&combined))
         }
-        Ok(Err(error)) => {
-            let _ = handle.join();
-            Err(error.into())
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            let _ = handle.join();
-            Ok(false)
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            let _ = handle.join();
-            Ok(false)
-        }
+        None => Ok(None),
     }
 }
 
@@ -931,13 +1035,13 @@ pub fn wifi_scan_network(
                     break;
                 }
                 let endpoint = format!("{subnet}.{i}:5555");
-                let connected =
-                    adb_connect_with_timeout(&adb, &endpoint, timeout_ms).unwrap_or(false);
-                let entry = WifiScanEntry {
-                    endpoint,
-                    rejected: !connected,
-                };
-                let _ = sender.send(entry);
+                if let Ok(Some(connected)) = adb_connect_with_timeout(&adb, &endpoint, timeout_ms) {
+                    let entry = WifiScanEntry {
+                        endpoint,
+                        rejected: !connected,
+                    };
+                    let _ = sender.send(entry);
+                }
             }
         }));
     }
@@ -953,15 +1057,7 @@ pub fn wifi_scan_network(
 /// Devuelve string vacío si la entrada está vacía o solo tiene espacios.
 #[allow(dead_code)]
 pub fn normalize_wifi_endpoint(input: &str) -> String {
-    let input = input.trim();
-    if input.is_empty() {
-        return String::new();
-    }
-    if input.contains(':') {
-        input.to_string()
-    } else {
-        format!("{input}:5555")
-    }
+    normalize_network_endpoint(input)
 }
 
 #[cfg(test)]
@@ -1190,6 +1286,45 @@ drwxr-xr-x 2 root root 4096 2026-10-28 10:15 DCIM\n\
         assert!(!validate_remote_path(""));
         assert!(validate_remote_path("/sdcard/Download"));
         assert!(validate_remote_path("/data/local/tmp"));
+    }
+}
+
+#[cfg(test)]
+mod classify_connect_output_tests {
+    use super::classify_connect_output;
+
+    #[test]
+    fn connected() {
+        assert_eq!(
+            classify_connect_output("connected to 192.168.1.85:5555"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn refused() {
+        assert_eq!(
+            classify_connect_output("failed to connect to '192.168.1.5:5555': Connection refused"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn timeout_is_none() {
+        assert_eq!(
+            classify_connect_output(
+                "failed to connect to '192.168.1.5:5555': Connection timed out"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn no_route_is_none() {
+        assert_eq!(
+            classify_connect_output("failed to connect to '192.168.1.5:5555': No route to host"),
+            None
+        );
     }
 }
 

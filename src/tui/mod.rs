@@ -1,5 +1,12 @@
 pub mod app;
+pub mod apps_state;
+pub mod device_info_state;
 pub mod events;
+pub mod logcat_state;
+pub mod network_state;
+pub mod processes_state;
+pub mod scripts_state;
+pub mod storage_state;
 pub mod ui;
 
 use anyhow::Result;
@@ -58,6 +65,14 @@ pub fn run(adb: &str, serial_override: Option<&str>, lang: Lang) -> Result<()> {
         app.poll_script_events();
         app.poll_logcat();
         app.poll_wifi_scan();
+        app.poll_app_cache();
+        app.poll_network_info();
+        app.poll_network_action();
+        app.poll_processes();
+        app.poll_device_info();
+        app.poll_file_browser();
+        app.poll_storage_usage();
+        app.poll_storage_volumes();
         terminal.draw(|f| ui::render(f, &mut app))?;
         if app.should_quit {
             break;
