@@ -1328,6 +1328,7 @@ mod classify_connect_output_tests {
     }
 }
 
+#[cfg(test)]
 mod connect_succeeded_tests {
     use super::connect_succeeded;
 
