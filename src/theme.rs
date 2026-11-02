@@ -5,8 +5,7 @@ pub struct Theme;
 impl Theme {
     pub fn selected() -> Style {
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
+            .fg(Color::LightGreen)
             .add_modifier(Modifier::BOLD)
     }
     pub fn normal() -> Style {
@@ -17,12 +16,12 @@ impl Theme {
     }
     pub fn title() -> Style {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(Color::LightGreen)
             .add_modifier(Modifier::BOLD)
     }
     pub fn section() -> Style {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(Color::LightGreen)
             .add_modifier(Modifier::BOLD)
     }
     pub fn danger() -> Style {
@@ -44,6 +43,6 @@ impl Theme {
         Style::default().fg(Color::DarkGray)
     }
     pub fn accent() -> Style {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(Color::LightGreen)
     }
 }

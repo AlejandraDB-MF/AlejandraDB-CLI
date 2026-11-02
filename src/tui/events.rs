@@ -32,6 +32,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
     match app.screen {
         Screen::DeviceSelect => handle_device_select(app, key),
+        Screen::DeviceDiscover | Screen::DiscoverDevices | Screen::DeviceDiscovery => {
+            handle_device_discover(app, key)
+        }
+        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected => {
+            handle_connected_devices(app, key)
+        }
         Screen::MainMenu => handle_main_menu(app, key),
         Screen::Scripts => handle_scripts(app, key),
         Screen::ScriptFolders => handle_script_folders(app, key),
@@ -64,16 +70,40 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_device_select(app: &mut App, key: KeyEvent) {
-    let total = app.devices.len() + 2;
+    let total = 2;
     match key.code {
         KeyCode::Up => {
-            if !app.loading {
-                App::move_list(&mut app.device_state, total, -1);
+            App::move_list(&mut app.device_state, total, -1);
+        }
+        KeyCode::Down => {
+            App::move_list(&mut app.device_state, total, 1);
+        }
+        KeyCode::Enter => {
+            let selected = app.device_state.selected().unwrap_or(0);
+            if selected == 0 {
+                app.open_connected_devices();
+            } else {
+                app.open_device_discover();
+            }
+        }
+        KeyCode::Esc => {
+            app.screen = Screen::MainMenu;
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_connected_devices(app: &mut App, key: KeyEvent) {
+    let total = app.devices.len();
+    match key.code {
+        KeyCode::Up => {
+            if !app.loading && total > 0 {
+                App::move_list(&mut app.connected_devices_state, total, -1);
             }
         }
         KeyCode::Down => {
-            if !app.loading {
-                App::move_list(&mut app.device_state, total, 1);
+            if !app.loading && total > 0 {
+                App::move_list(&mut app.connected_devices_state, total, 1);
             }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -81,21 +111,42 @@ pub fn handle_device_select(app: &mut App, key: KeyEvent) {
             app.status = i18n::tr("device.select.loading");
         }
         KeyCode::Enter => {
-            let selected = app.device_state.selected().unwrap_or(0);
-            if selected < app.devices.len() {
-                if app.devices.is_empty() {
-                    app.loading = true;
-                    app.status = i18n::tr("device.select.loading");
-                    return;
-                }
-                let device = &app.devices[selected];
-                if device.state != "device" {
-                    app.status = format!("{} ({})", i18n::tr("app.status.no_device"), device.state);
-                    return;
-                }
-                let serial = device.serial.clone();
-                app.select_device(serial);
-            } else if selected == app.devices.len() {
+            let selected = app.connected_devices_state.selected().unwrap_or(0);
+            if app.devices.is_empty() {
+                app.loading = true;
+                app.status = i18n::tr("device.select.loading");
+                return;
+            }
+            if selected >= app.devices.len() {
+                return;
+            }
+            let device = &app.devices[selected];
+            if device.state != "device" {
+                app.status = format!("{} ({})", i18n::tr("app.status.no_device"), device.state);
+                return;
+            }
+            let serial = device.serial.clone();
+            app.select_device(serial);
+        }
+        KeyCode::Esc => {
+            app.open_device_select();
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_device_discover(app: &mut App, key: KeyEvent) {
+    let total = 2;
+    match key.code {
+        KeyCode::Up => {
+            App::move_list(&mut app.device_discover_state, total, -1);
+        }
+        KeyCode::Down => {
+            App::move_list(&mut app.device_discover_state, total, 1);
+        }
+        KeyCode::Enter => {
+            let selected = app.device_discover_state.selected().unwrap_or(0);
+            if selected == 0 {
                 app.open_wifi_discover();
             } else {
                 app.screen = Screen::WifiConnect;
@@ -106,7 +157,7 @@ pub fn handle_device_select(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Esc => {
-            app.screen = Screen::MainMenu;
+            app.open_device_select();
         }
         _ => {}
     }

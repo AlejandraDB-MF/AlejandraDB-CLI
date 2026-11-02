@@ -34,6 +34,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     match app.screen {
         Screen::DeviceSelect => render_device_select(f, app, chunks[0]),
+        Screen::DeviceDiscover | Screen::DiscoverDevices | Screen::DeviceDiscovery => {
+            render_device_discover(f, app, chunks[0])
+        }
+        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected => {
+            render_connected_devices(f, app, chunks[0])
+        }
         Screen::MainMenu => render_main_menu(f, app, chunks[0]),
         Screen::Scripts => render_scripts(f, app, chunks[0]),
         Screen::ScriptFolders => render_script_folders(f, app, chunks[0]),
@@ -93,7 +99,27 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         f.render_widget(para, area);
         return;
     }
-    let mut items: Vec<ListItem> = app
+    let items = vec![
+        ListItem::new(i18n::tr("device.connected.title")),
+        ListItem::new(i18n::tr("device.discover.title")),
+    ];
+    let mut state = app.device_state;
+    let list = List::new(items)
+        .block(menu_block(title))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.device_state = state;
+}
+
+fn render_connected_devices(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = i18n::tr("device.connected.title");
+    if app.loading {
+        let para = Paragraph::new(i18n::tr("device.select.loading")).block(menu_block(title));
+        f.render_widget(para, area);
+        return;
+    }
+    let items: Vec<ListItem> = app
         .devices
         .iter()
         .map(|d| {
@@ -108,15 +134,28 @@ fn render_device_select(f: &mut Frame, app: &mut App, area: ratatui::layout::Rec
             ))
         })
         .collect();
-    items.push(ListItem::new(i18n::tr("device.select.discover")));
-    items.push(ListItem::new(i18n::tr("device.select.connect_ip")));
-    let mut state = app.device_state;
+    let mut state = app.connected_devices_state;
     let list = List::new(items)
-        .block(menu_block(title))
+        .block(menu_block(title.to_string()))
         .highlight_style(Theme::selected())
         .highlight_symbol(">> ");
     f.render_stateful_widget(list, area, &mut state);
-    app.device_state = state;
+    app.connected_devices_state = state;
+}
+
+fn render_device_discover(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let title = i18n::tr("device.discover.title");
+    let items = vec![
+        ListItem::new(i18n::tr("device.discover.scan")),
+        ListItem::new(i18n::tr("device.select.connect_ip")),
+    ];
+    let mut state = app.device_discover_state;
+    let list = List::new(items)
+        .block(menu_block(title.to_string()))
+        .highlight_style(Theme::selected())
+        .highlight_symbol(">> ");
+    f.render_stateful_widget(list, area, &mut state);
+    app.device_discover_state = state;
 }
 
 fn render_main_menu(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -212,7 +251,8 @@ fn render_processes(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let serial = app.serial.as_deref().unwrap_or("-");
     let title = rust_i18n::t!("processes.title", serial = serial).to_string();
     if app.processes.processes_loading {
-        let para = Paragraph::new(loading_indicator(&i18n::tr("processes.status.loading"))).block(menu_block(title));
+        let para = Paragraph::new(loading_indicator(&i18n::tr("processes.status.loading")))
+            .block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
@@ -448,7 +488,8 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     };
 
     if !app.apps.app_cache_loaded {
-        let para = Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
@@ -463,8 +504,8 @@ fn render_app_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     };
     let inner_width = area.width.saturating_sub(2) as usize;
     let inner_width = if inner_width == 0 { 1 } else { inner_width };
-    let wrapped_lines = (hints_text.len() + inner_width - 1) / inner_width;
-    let wrapped_lines = wrapped_lines.max(1).min(4);
+    let wrapped_lines = hints_text.len().div_ceil(inner_width);
+    let wrapped_lines = wrapped_lines.clamp(1, 4);
     let footer_height = (wrapped_lines + 2) as u16;
 
     let mut state = app.apps.app_state;
@@ -578,7 +619,8 @@ fn render_confirm(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 fn render_device_info(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let title = i18n::tr("info.title");
     if app.device_info.device_info_loading {
-        let para = Paragraph::new(loading_indicator(&i18n::tr("info.loading"))).block(menu_block(title));
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("info.loading"))).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }
@@ -819,7 +861,8 @@ fn render_wifi_connect(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect
 fn render_file_browser(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let title = format!("Files: {}", app.storage.file_browser_path);
     if app.storage.file_browser_loading {
-        let para = Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
+        let para =
+            Paragraph::new(loading_indicator(&i18n::tr("files.loading"))).block(menu_block(title));
         f.render_widget(para, area);
         return;
     }

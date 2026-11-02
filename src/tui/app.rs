@@ -47,8 +47,15 @@ pub enum NetworkAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Screen {
     DeviceSelect,
+    DeviceDiscover,
+    DiscoverDevices,
+    DeviceDiscovery,
+    ConnectedDevices,
+    DeviceList,
+    DevicesConnected,
     MainMenu,
     Scripts,
     ScriptFolders,
@@ -129,6 +136,8 @@ pub struct App {
     pub serial: Option<String>,
     pub devices: Vec<Device>,
     pub device_state: ListState,
+    pub device_discover_state: ListState,
+    pub connected_devices_state: ListState,
     pub screen: Screen,
     pub last_screen: Option<Screen>,
     pub lang: Lang,
@@ -162,6 +171,10 @@ impl App {
     pub fn new(adb: String, serial_override: Option<String>, lang: Lang) -> Self {
         let mut device_state = ListState::default();
         device_state.select(Some(0));
+        let mut device_discover_state = ListState::default();
+        device_discover_state.select(Some(0));
+        let mut connected_devices_state = ListState::default();
+        connected_devices_state.select(Some(0));
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
         let mut scripts_menu_state = ListState::default();
@@ -194,6 +207,8 @@ impl App {
             serial: None,
             devices: Vec::new(),
             device_state,
+            device_discover_state,
+            connected_devices_state,
             screen: Screen::MainMenu,
             last_screen: None,
             lang,
@@ -340,11 +355,47 @@ impl App {
     pub fn open_device_select(&mut self) {
         self.screen = Screen::DeviceSelect;
         self.device_state.select(Some(0));
+        self.status = i18n::tr("device.select.status").to_string();
+    }
+
+    pub fn open_connected_devices(&mut self) {
+        self.screen = Screen::ConnectedDevices;
+        self.connected_devices_state.select(Some(0));
         self.status = if self.devices.is_empty() {
             i18n::tr("device.select.no_usb")
         } else {
             i18n::tr("device.select.status")
         };
+    }
+
+    #[allow(dead_code)]
+    pub fn open_device_list(&mut self) {
+        self.open_connected_devices();
+    }
+
+    #[allow(dead_code)]
+    pub fn open_devices_connected(&mut self) {
+        self.open_connected_devices();
+    }
+
+    pub fn open_device_discover(&mut self) {
+        self.screen = Screen::DeviceDiscover;
+        self.device_discover_state.select(Some(0));
+        self.status = i18n::tr("device.select.status").to_string();
+    }
+
+    #[allow(dead_code)]
+    pub fn open_discover_devices(&mut self) {
+        self.screen = Screen::DiscoverDevices;
+        self.device_discover_state.select(Some(0));
+        self.status = i18n::tr("device.select.status").to_string();
+    }
+
+    #[allow(dead_code)]
+    pub fn open_device_discovery(&mut self) {
+        self.screen = Screen::DeviceDiscovery;
+        self.device_discover_state.select(Some(0));
+        self.status = i18n::tr("device.select.status").to_string();
     }
 
     pub fn open_scripts(&mut self) {
@@ -1405,15 +1456,21 @@ impl App {
                     return;
                 }
                 if self.devices.is_empty() {
-                    self.device_state.select(None);
-                    self.status = if self.screen == Screen::DeviceSelect {
+                    self.connected_devices_state.select(None);
+                    self.status = if matches!(
+                        self.screen,
+                        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected
+                    ) {
                         i18n::tr("device.select.none")
                     } else {
                         i18n::tr("app.status.no_device")
                     };
                 } else {
-                    self.device_state.select(Some(0));
-                    self.status = if self.screen == Screen::DeviceSelect {
+                    self.connected_devices_state.select(Some(0));
+                    self.status = if matches!(
+                        self.screen,
+                        Screen::ConnectedDevices | Screen::DeviceList | Screen::DevicesConnected
+                    ) {
                         i18n::tr("device.select.status")
                     } else {
                         i18n::tr("app.status.no_device_selected")

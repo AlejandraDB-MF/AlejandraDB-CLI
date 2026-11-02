@@ -324,6 +324,9 @@ network.confirm.disable: "¿Desactivar Wi-Fi ADB (volver a modo USB)?\n(y/Enter 
 network.hint: "Enter ejecutar · r actualizar · Esc volver"
 
 device.select.discover: "Descubrir dispositivos Wi-Fi"
+device.discover.title: "Descubrir dispositivos"
+device.connected.title: "Dispositivos conectados"
+device.discover.scan: "Descubrir en la red"
 device.select.connect_ip: "Conectar por IP"
 device.select.no_usb: "No se detectaron dispositivos USB"
 wifi.discover.title: "Descubrir dispositivos Wi-Fi"

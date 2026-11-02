@@ -963,10 +963,34 @@ pub fn connect_succeeded(text: &str) -> bool {
     lower.contains("connected")
 }
 
+/// Clasifica la salida de `adb connect`.
+/// - `Some(true)` si se conectó.
+/// - `Some(false)` si fue rechazado activamente (p. ej. connection refused).
+/// - `None` si no hubo respuesta útil (timeout, sin ruta, etc.) y no debe mostrarse.
+pub fn classify_connect_output(text: &str) -> Option<bool> {
+    let lower = text.to_lowercase();
+    if lower.trim().is_empty()
+        || lower.contains("timed out")
+        || lower.contains("no route")
+        || lower.contains("cannot")
+        || lower.contains("unable")
+    {
+        return None;
+    }
+    if connect_succeeded(text) {
+        return Some(true);
+    }
+    if lower.contains("refused") || lower.contains("failed") || lower.contains("error") {
+        return Some(false);
+    }
+    None
+}
+
 /// Intenta `adb connect <endpoint>` con un tiempo de espera corto.
-/// Devuelve `Ok(true)` si el dispositivo se conectó, `Ok(false)` si fue rechazado
-/// (incluyendo timeout), y `Err` si no se pudo ejecutar adb.
-fn adb_connect_with_timeout(adb: &str, endpoint: &str, timeout_ms: u64) -> Result<bool> {
+/// Devuelve `Ok(Some(true))` si se conectó, `Ok(Some(false))` si fue rechazado
+/// activamente, `Ok(None)` si no hubo respuesta útil (no se muestra), y `Err`
+/// si no se pudo ejecutar adb.
+fn adb_connect_with_timeout(adb: &str, endpoint: &str, timeout_ms: u64) -> Result<Option<bool>> {
     let mut cmd = Command::new(adb);
     cmd.args(["connect", endpoint]);
     match output_with_timeout(cmd, Duration::from_millis(timeout_ms)) {
@@ -976,9 +1000,9 @@ fn adb_connect_with_timeout(adb: &str, endpoint: &str, timeout_ms: u64) -> Resul
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            Ok(connect_succeeded(&combined))
+            Ok(classify_connect_output(&combined))
         }
-        None => Ok(false),
+        None => Ok(None),
     }
 }
 
@@ -1011,13 +1035,15 @@ pub fn wifi_scan_network(
                     break;
                 }
                 let endpoint = format!("{subnet}.{i}:5555");
-                let connected =
-                    adb_connect_with_timeout(&adb, &endpoint, timeout_ms).unwrap_or(false);
-                let entry = WifiScanEntry {
-                    endpoint,
-                    rejected: !connected,
-                };
-                let _ = sender.send(entry);
+                if let Ok(Some(connected)) =
+                    adb_connect_with_timeout(&adb, &endpoint, timeout_ms)
+                {
+                    let entry = WifiScanEntry {
+                        endpoint,
+                        rejected: !connected,
+                    };
+                    let _ = sender.send(entry);
+                }
             }
         }));
     }
@@ -1266,6 +1292,39 @@ drwxr-xr-x 2 root root 4096 2026-10-28 10:15 DCIM\n\
 }
 
 #[cfg(test)]
+mod classify_connect_output_tests {
+    use super::classify_connect_output;
+
+    #[test]
+    fn connected() {
+        assert_eq!(classify_connect_output("connected to 192.168.1.85:5555"), Some(true));
+    }
+
+    #[test]
+    fn refused() {
+        assert_eq!(
+            classify_connect_output("failed to connect to '192.168.1.5:5555': Connection refused"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn timeout_is_none() {
+        assert_eq!(
+            classify_connect_output("failed to connect to '192.168.1.5:5555': Connection timed out"),
+            None
+        );
+    }
+
+    #[test]
+    fn no_route_is_none() {
+        assert_eq!(
+            classify_connect_output("failed to connect to '192.168.1.5:5555': No route to host"),
+            None
+        );
+    }
+}
+
 mod connect_succeeded_tests {
     use super::connect_succeeded;
 

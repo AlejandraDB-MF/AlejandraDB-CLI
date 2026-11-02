@@ -324,6 +324,9 @@ network.confirm.disable: "Disable Wi-Fi ADB (switch to USB mode)?\n(y/Enter yes,
 network.hint: "Enter run · r refresh · Esc back"
 
 device.select.discover: "Discover Wi-Fi devices"
+device.discover.title: "Discover devices"
+device.connected.title: "Connected devices"
+device.discover.scan: "Discover on network"
 device.select.connect_ip: "Connect by IP"
 device.select.no_usb: "No USB devices detected"
 wifi.discover.title: "Discover Wi-Fi devices"
